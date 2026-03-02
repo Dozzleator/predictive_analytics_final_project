@@ -26,7 +26,19 @@ class full_pipeline_recommendation(BaseModel):
     # column recommendations
     column_strategies : List[column_recomendation]
 
-def call_lm_statistical(metadata_json: str) -> str:
+def call_lm_statistical(metadata_json: str, extra_feedback: str = None) -> str:
+    '''Call Ollama model to generate suggestions for data pipeline'''
+    # LLM to review metadata (Used for first run)
+    user_content = f'Review this metadata {metadata_json}'
+
+    # Provide feedback of invalid errors (subsiquent runs)
+    if extra_feedback:
+        user_content += (
+            f"""\nVALIDATION FEEDBACK
+            \tThe previous plan had the following errors: {extra_feedback}, please regenerate the plan and fix these issues."""
+        )
+
+    # Model setup and call
     response : Mapping[str, Any] = ollama.chat (
         model= "llama3.2:3b",
         format=full_pipeline_recommendation.model_json_schema(), 
@@ -43,9 +55,13 @@ def call_lm_statistical(metadata_json: str) -> str:
             {
                 # Provide data to the model
                 'role' : 'user',
-                'content' : f'Review this metadata {metadata_json}'
+                'content' : user_content
             }
-        ]
+        ],
+        # turn up percision for iterative validation
+        options= {
+            'temperature' : 0.2 if extra_feedback else 0.7
+        }
     )
 
     # pull content from LLM reply
