@@ -31,6 +31,7 @@ def main() -> None:
     print(f"\n\033[94mPrinting final model recomendations:\033[00m")
     print(json.dumps(final_plan, indent= 4))
     print(f"\n Model validated dataset with {attempts} attempts")
+
     return None
 
 if __name__ == "__main__":
