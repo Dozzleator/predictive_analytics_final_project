@@ -49,15 +49,21 @@ class result_validator:
         # List to hold all error information
         all_errors = []
 
-        # Validate model is correct type
-        task_validation = self.model_validator()
-        if task_validation['status'] == 'invalid':
-            all_errors.append(task_validation['errors'])
+        # Add validation check functions to list
+        check_methods = [
+                    self.model_validator,
+                    self.outlier_validator,
+                    self.cardinality_validator,
+                    self.imputation_validator,
+                    self.scaling_validator,
+                    self.multicollinearity_validator
+                ]
 
-        # Validate outliers removal has been assigned correctly
-        outlier_validation = self.outlier_validator()
-        if outlier_validation['status'] == 'invalid':
-            all_errors.append(outlier_validation['errors'])
+        # Run checks and if error raised add to list
+        for method in check_methods:
+            result = method()
+            if result['status'] == 'invalid':
+                all_errors.append(result['errors'])
 
         if all_errors:
             return {'status' : 'invalid', 'errors': ' | '.join(all_errors)}
@@ -106,7 +112,7 @@ class result_validator:
         # collect errors to return to LLM in batch
         errors = []
 
-        # Find the outlier removal suggestion   from recomendations and validate
+        # Find the outlier removal suggestion from recomendations and validate
         for strategy in self.ai_result.get('column_strategies', []):
             column_name = strategy['column_name']
             if column_name in self.df.columns and pd.api.types.is_numeric_dtype(self.df[column_name]):
@@ -129,7 +135,7 @@ class result_validator:
                             errors.append(
                                 f'''Outlier removal suggested for {column_name}, but only {outlier_count} 
                                 \t outliers ({outlier_count/len(data):.1%}) were detected. 
-                                \t Statistical evidence is too weak to justify removal.'''
+                                \t Statistical evidence is too weak to justify removal.'''.strip()
                             )
 
         # Collect errors and add to list
@@ -137,3 +143,171 @@ class result_validator:
             return {'status' : 'invalid', 'errors' : ' | '.join(errors)}
         return {'status' : 'valid'}
 
+    def cardinality_validator(self) -> Dict[str, Any]:
+        '''Validate that encoding recommendations'''
+        # collect errors to return to LLM in batch
+        errors = []
+
+        # Map the column names to associated meta_data (generated in data_scan.py)
+        meta_lookup = {col['name']: col for col in self.metadata.get('columns', [])}
+
+        # Find column information for validation check
+        for strategy in self.ai_result.get('column_strategies', []):
+            column_name = strategy['column_name']
+            column_data = meta_lookup.get(column_name)
+
+            # continue search if no meta_data found in column
+            if not column_data:
+                continue
+
+            # Find top three results suggested by AI
+            options = strategy.get('top_three_options', []) 
+
+            # High cardinality validation (don't use One-Hot encoding)
+            if column_data.get('high_cardinality') is True:
+                if any('one' in opt.get('name', '').lower() for opt in options):
+                    errors.append(
+                        f'''Column {column_name} has high cardinality ({column_data['unique_values']} values)
+                        \t One-hot Encoding may lead to overfiting suggest the use of target encoding or feature hashing instead'''.strip()
+                    )
+
+            # Check datatype to make sure encoding is plausable
+            if column_data.get('is_categorical') is False and column_data.get('type') != 'str':
+                if any('encod' in opt.get('name', '').lower() for opt in options):
+                    errors.append(
+                        f'''Encoding suggested for {column_name} column
+                        \thowever column metadata shows dtype is already numeric {column_data['type']}, suggest scalling data instead'''.strip()
+                    )
+
+            # Check if binary (Encoding not required)
+            if column_data.get('is_binary') is True:
+                if any(term in opt.get('name', '').lower() for opt in options for term in ['target', 'one']):
+                    errors.append(
+                        f'''Column {column_name} is binary data. Encoding is not required
+                        \tSuggest binary mapping'''
+                    )
+
+            # Check for ordinal encoding hallucinations
+            if any('ordinal' in opt.get('name', '').lower() for opt in options):
+                if column_data.get('is_categorical') is False:
+                    errors.append(f'Ordinal encoding was suggested for {column_name}, but is is a continuous numeric column'.strip())
+                if column_data.get('unique_values', 0) > 10:
+                    errors.append(
+                        f'''Ordinal encoding suggested for {column_name} but has {column_data['unique_values']} unique values
+                        \tOrdinal encoding is generally used for small ranked sets (eg. low, medium, high)'''.strip()
+                    )
+
+        # Collect errors and add to list    
+        if errors:
+            return {'status' : 'invalid', 'errors' : ' | '.join(errors)}
+        return {'status' : 'valid'}
+
+    def imputation_validator(self) -> Dict[str, Any]:
+        '''Ensure imputation is only recommended on columns with missing values'''
+        # collect errors to return to LLM in batch
+        errors = []
+
+        # Map the column names to associated meta_data (generated in data_scan.py)
+        meta_lookup = {col['name']: col for col in self.metadata.get('columns', [])}
+
+        # Find column information for validation check
+        for strategy in self.ai_result.get('column_strategies', []):
+            column_name = strategy['column_name']
+            column_data = meta_lookup.get(column_name)
+
+            # continue search if no meta_data found in column
+            if not column_data:
+                continue
+
+            # Find top three results suggested by AI
+            options = strategy.get('top_three_options', []) 
+
+            # Check for missing values 
+            has_missing = column_data.get('missing_values', 0) > 0
+
+            # Validate reccomendation for imputation or filling is not on empty columns
+            if any(term in opt.get('name', '').lower() for opt in options for term in ['imput', 'fill']):
+                if not has_missing:
+                    errors.append(
+                        f'''Imputation suggested for {column_name} but does not have missing values
+                        \tsuggest scalling or transformation'''.strip()
+                    )
+
+        # Collect errors and add to list    
+        if errors:
+            return {'status' : 'invalid', 'errors' : ' | '.join(errors)}
+        return {'status' : 'valid'}
+
+    def scaling_validator(self) -> Dict[str, Any]:
+        '''Check standardisation recommendations made by LLM and validate legitimacy'''
+        # collect errors to return to LLM in batch
+        errors = []
+
+        # Map the column names to associated meta_data (generated in data_scan.py)
+        meta_lookup = {col['name']: col for col in self.metadata.get('columns', [])}
+
+        # Find column information for validation check
+        for strategy in self.ai_result.get('column_strategies', []):
+            column_name = strategy['column_name']
+            column_data = meta_lookup.get(column_name)
+
+            # continue search if no meta_data or numeric data found in column
+            if not column_data or not pd.api.types.is_numeric_dtype(self.df):
+                continue
+
+            # Find top three results suggested by AI
+            options = strategy.get('top_three_options', []) 
+
+            # Find data skew for each column
+            skewness = column_data.get('skewness', 0)
+
+            # Validate logrithmic transformation suggestion (make sure data has skew)
+            if any('log' in opt.get('name', '').lower() for opt in options):
+                if abs(skewness) < 0.5:
+                    errors.append(
+                        f'''Log transformation suggested for {column_name} but skewness for the column is only {skewness:.2f}
+                        \tData is nearly normally suggest standard scalling instead'''.strip()
+                    )
+
+            # Validate standard scaling suggestion (make sure not highly skewed)
+            if any('standard' in opt.get('name', '').lower() for opt in options):
+                if abs(skewness) > 1.5:
+                    errors.append(
+                        f'''Standardisation suggested for {column_name} but column is highly skewed {skewness:.2f}
+                        \tSuggest another standardisation technique to handle highly skewed data instead'''.strip()
+                    )
+
+        # Collect errors and add to list    
+        if errors:
+            return {'status' : 'invalid', 'errors' : ' | '.join(errors)}
+        return {'status' : 'valid'}
+
+    def multicollinearity_validator(self) -> Dict[str, Any]:
+        '''Check to see if AI is accuratly reducing or keeping features'''
+        # collect errors to return to LLM in batch
+        errors = []
+
+        # get meta_data of correlation related to columns
+        correlated_columns = self.metadata.get('high_corilation_features', [])
+
+        # end search if there are no highly correlated columns
+        if not correlated_columns:
+            return {'status': 'valid'}
+
+        # Find column names for columns that have had AI suggestions
+        suggested_names = [strategy.get('column_name') for strategy in self.ai_result.get('column_strategies', [])]
+
+        # find only the columns where correlation has actually been recommended
+        recommendation_columns = [col for col in correlated_columns if col in suggested_names]
+
+        # If there are highly correlated columns then rais error
+        if len(recommendation_columns) > 1:
+            errors.append(
+                f'''Features in {recommendation_columns} are highly correlated, Using all will introduce multicollinearity
+                \tSuggest dropping redunted features'''.strip()
+            )
+
+        # Collect errors and add to list    
+        if errors:
+            return {'status' : 'invalid', 'errors' : ' | '.join(errors)}
+        return {'status' : 'valid'}

@@ -48,8 +48,11 @@ def call_lm_statistical(metadata_json: str, extra_feedback: str = None) -> str:
                 'role' : 'system',
                 'content': (
                     'You are a Senior Data Science Consultant. Review the metadata and provide '
-                    'exactly THREE ranked options for every global strategy (models, global imputation) '
-                    'and THREE options for every specific column action. Output ONLY raw JSON.'
+                    'the top three ranked options for every global strategy (models, global imputation) '
+                    'and the top three options for every specific column action. '
+                    'If you are unable to generate three valid outputs then it is fine to give one or two recomendations.'
+                    'If nothing is required for a column then there is no need to provide any recommenations.'
+                    'Output ONLY raw JSON.'
                 )
             },
             {
