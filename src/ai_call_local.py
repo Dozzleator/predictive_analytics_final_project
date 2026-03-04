@@ -26,7 +26,7 @@ class full_pipeline_recommendation(BaseModel):
     # column recommendations
     column_strategies : List[column_recomendation]
 
-def call_lm_statistical(metadata_json: str, extra_feedback: str = None) -> str:
+def call_lm_local(metadata_json: str, extra_feedback: str = None) -> str:
     '''Call Ollama model to generate suggestions for data pipeline'''
     # LLM to review metadata (Used for first run)
     user_content = f'Review this metadata {metadata_json}'
@@ -40,19 +40,25 @@ def call_lm_statistical(metadata_json: str, extra_feedback: str = None) -> str:
 
     # Model setup and call
     response : Mapping[str, Any] = ollama.chat (
-        model= "llama3.2:3b",
+        model= "qwen2.5-coder:3b",
         format=full_pipeline_recommendation.model_json_schema(), 
         messages=[
             {
                 # Give model context and set to provide appropriate respones
                 'role' : 'system',
                 'content': (
-                    'You are a Senior Data Science Consultant. Review the metadata and provide '
-                    'the top three ranked options for every global strategy (models, global imputation) '
-                    'and the top three options for every specific column action. '
-                    'If you are unable to generate three valid outputs then it is fine to give one or two recomendations.'
-                    'If nothing is required for a column then there is no need to provide any recommenations.'
-                    'Output ONLY raw JSON.'
+                    "You are a Senior Data Science Consultant. Your goal is to provide a PRECISION data pipeline. "
+                    "DO NOT give generic advice. You must examine the 'missing_values', 'has_outliers', "
+                    "and 'is_categorical' fields for EVERY column."
+                    
+                    "\n\nSTRICT LOGIC RULES:"
+                    "\n1. IF 'missing_values' == 0: You are FORBIDDEN from suggesting Imputation for that column."
+                    "\n2. IF 'has_outliers' == false: You are FORBIDDEN from suggesting Outlier Removal for that column."
+                    "\n3. IF 'is_binary' == true: Suggest only 1 strategy (e.g., Label Encoding)."
+                    "\n4. If a column is already clean (0 missing, no outliers, correctly typed), OMIT it from the JSON."
+                    "\n5. Provide up to 3 options ONLY if the data complexity justifies it."
+                    
+                    "\n\nOutput ONLY raw JSON matching the schema."
                 )
             },
             {
@@ -63,7 +69,7 @@ def call_lm_statistical(metadata_json: str, extra_feedback: str = None) -> str:
         ],
         # turn up percision for iterative validation
         options= {
-            'temperature' : 0.2 if extra_feedback else 0.7
+            'temperature' : 0.2 if extra_feedback else 0.5
         }
     )
 

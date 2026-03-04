@@ -1,10 +1,16 @@
 import json
 import time
+from ai_call_api import call_lm_api
+from ai_call_local import call_lm_api
 from data_scan import read_csv, scan_df
-from ai_call import call_lm_statistical
 from validator import result_validator
 
 def main() -> None:
+    # Set run parameters
+    max_ai_calls = 50
+    model_function = call_lm_api
+    input_dir = "student_dropout_data/student_dropout_dataset.csv"
+
     # Starting program
     print("""\n\033[92mStarting Program\033[00m""")
 
@@ -12,7 +18,7 @@ def main() -> None:
     target_column = "Study_Hours_per_Day"
 
     # Read in CSV data
-    df = read_csv("student_dropout_dataset.csv")
+    df = read_csv(input_dir)
     print(f"\n\033[91mPrinting the first 10 rows of selected CSV:\033[00m")
     print(df.head(10))
 
@@ -25,7 +31,7 @@ def main() -> None:
     model_start = time.time()
     print(f"\n\033[94mStarting recommendation generation\033[00m")
     validated_json = result_validator(df, {}, target_column, df_metadata)
-    final_plan, attempts = validated_json.run_validator(max_attempts= 3)
+    final_plan, attempts = validated_json.run_validator(model_function, max_ai_calls)
     model_end = time.time() - model_start
     print(f"\n** Model took {model_end:.2f} seconds to generate results **")
     print(f"\n\033[94mPrinting final model recomendations:\033[00m")

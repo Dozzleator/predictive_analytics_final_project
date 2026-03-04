@@ -205,3 +205,7 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# other files to ignore
+input_data/
+src/ai_call_api.py

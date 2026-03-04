@@ -1,11 +1,9 @@
 import json
 import pandas as pd
 from typing import Dict, Any
-from ai_call import call_lm_statistical
 from sklearn.ensemble import IsolationForest
 from sklearn.utils import all_estimators
 from sklearn.utils.multiclass import type_of_target
-from scipy.stats import skew
 
 class result_validator:
     def __init__(self, df: pd.DataFrame, ai_result: Dict[str, Any], target_col: Any, meta_data: str):
@@ -19,7 +17,7 @@ class result_validator:
         self.regression_models = [name for name, _ in all_estimators(type_filter='regressor')]
         self.classification_models = [name for name, _ in all_estimators(type_filter='classifier')]
 
-    def run_validator(self, max_attempts: int = None):
+    def run_validator(self, model_function, max_attempts: int = None):
         '''Uses an iteritive approach to run through all validation checks up to maximum attempts and return validated report'''
         # Assing conditional variables
         attempts = 0
@@ -27,7 +25,7 @@ class result_validator:
 
         # Call LLM calls to check data iteration
         while attempts < max_attempts:
-            output_json = call_lm_statistical(self.metadata, feedback)
+            output_json = model_function(self.metadata, feedback)
             self.ai_result = json.loads(output_json)
 
             # go through all checks to generate a final report
