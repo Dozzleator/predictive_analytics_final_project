@@ -1,14 +1,14 @@
 import json
 import time
-from ai_call_api import call_lm_api
-from ai_call_local import call_lm_api
+# from ai_call_api import call_lm_api
+from ai_call_local import call_lm_local
 from data_scan import read_csv, scan_df
 from validator import result_validator
 
 def main() -> None:
     # Set run parameters
     max_ai_calls = 50
-    model_function = call_lm_api
+    model_function = call_lm_local
     input_dir = "student_dropout_data/student_dropout_dataset.csv"
 
     # Starting program

@@ -50,6 +50,7 @@ def call_lm_local(metadata_json: str, extra_feedback: str = None) -> str:
                     "You are a Senior Data Science Consultant. Your goal is to provide a PRECISION data pipeline. "
                     "DO NOT give generic advice. You must examine the 'missing_values', 'has_outliers', "
                     "and 'is_categorical' fields for EVERY column."
+                    "Make sure the first thing you suggest is the type of model that should be used."
                     
                     "\n\nSTRICT LOGIC RULES:"
                     "\n1. IF 'missing_values' == 0: You are FORBIDDEN from suggesting Imputation for that column."
