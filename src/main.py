@@ -7,7 +7,7 @@ from validator import result_validator
 
 def main() -> None:
     # Set run parameters
-    max_ai_calls = 50
+    max_ai_calls = 1
     model_function = call_lm_local
     input_dir = "student_dropout_data/student_dropout_dataset.csv"
 

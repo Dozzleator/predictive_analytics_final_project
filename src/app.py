@@ -113,7 +113,7 @@ def build_dataset_overview(df: pd.DataFrame, target_col: str) -> json:
 
             # Highlight column if is target_col 
             numerical_df = numerical_df.style.apply(
-                lambda col: ['background-color: rgba(255, 215, 0, 0.3)' if col.name == target_col else '' for _ in col], 
+                lambda col: ['background-color: rgba(130, 224, 145, 0.3)' if col.name == target_col else '' for _ in col], 
                 axis=0
             )
 
@@ -152,7 +152,7 @@ def build_dataset_overview(df: pd.DataFrame, target_col: str) -> json:
 
             # Highlight column if is target_col 
             object_df = object_df.style.apply(
-                lambda col: ['background-color: rgba(255, 215, 0, 0.3)' if col.name == target_col else '' for _ in col], 
+                lambda col: ['background-color: rgba(130, 224, 145, 0.3)' if col.name == target_col else '' for _ in col], 
                 axis=0
             )
 
@@ -174,6 +174,10 @@ def build_dataset_overview(df: pd.DataFrame, target_col: str) -> json:
     return meta_data
 
 def build_LLM_validator(df: pd.DataFrame, meta_data: json, target_col: str, LLM_call: Callable, input_attempts: int, run_attempts: int) -> json:
+    
+    # Initilise with nothing (prevent unbound error)
+    recommendations = None
+
     # Loop to excecute the validator
     if st.button("Generate validated pipeline"):
         with st.status("Analysing data and generating recommendations please wait", expanded= True) as status:
@@ -191,8 +195,49 @@ def build_LLM_validator(df: pd.DataFrame, meta_data: json, target_col: str, LLM_
             except Exception as e:
                 status.update(label="Validation Failed", state= 'error')
                 st.error(f"Encountered error as {e} during validation process")
+    return recommendations
 
+def build_LLM_result_view(recommendations: json) -> None:
+    '''Create a view to see the AI recommendations in sorted format'''
 
+    # Exit if not run recommendations yet
+    if recommendations is None:
+        return
+
+    # Create view for global recomendations
+    st.subheader('Global Strategies')
+    if 'global_strategies' in recommendations:
+
+        # Create a new tab for each global recommendation
+        global_categories = [strategy['category'].title() for strategy in recommendations['global_strategies']]
+        global_tabs = st.tabs(global_categories)
+
+        # Create a tab for each strategy and show top 3 recommendations in each tab
+        for i, strategy in enumerate(recommendations['global_strategies']):
+            with global_tabs[i]:
+                cols = st.columns(3)
+                for idx, option in enumerate(strategy.get('top_three_options', [])[:3]):
+                    with cols[idx]:
+                        st.subheader(option['name'])
+                        with st.expander("View Strategy Details", expanded=True):
+                            st.write(f"**Action:** {option['action']}")
+                            st.write(f"**Reasoning:** {option['reasoning']}")
+                st.divider()
+
+    # Create view for column wise recommendations 
+    st.subheader('Feature-Level Recomendations')
+    if 'column_strategies' in recommendations:
+        strategies = recommendations['column_strategies']
+        if strategies:
+            column_tabs = st.tabs([columns.get('column_name', 'unkown') for columns in strategies])
+            for i, column_strategies in enumerate(strategies):
+                with column_tabs[i]:
+                    for option in column_strategies.get('top_three_options', []):
+                        with st.expander(f'{option.get('name')}', expanded= True):
+                            st.write(f"**Action:** {option.get('action')}")
+                            st.write(f"**Explination:** {option.get('reasoning')}")
+
+    return None
 
 def build_reset_button() -> None:
     '''Reset button to reset seeion state if user wants to upload new .CSV'''
@@ -221,7 +266,10 @@ def main() -> None:
         meta_data = build_dataset_overview(df, target_col)
 
         # Run validator 
-        build_LLM_validator(df, meta_data, target_col, LLM_call, input_attempts, run_attempts)
+        recommendations = build_LLM_validator(df, meta_data, target_col, LLM_call, input_attempts, run_attempts)
+
+        # Build view for ouput recommendations
+        build_LLM_result_view(recommendations)
 
     else:
         st.info('Please upload a .CSV file to begin')
