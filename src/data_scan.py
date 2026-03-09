@@ -42,6 +42,7 @@ def scan_df(df: pd.DataFrame, predict_col: str = None) -> dict:
     # store general information related to the dataframe
     metadata = {
         "total_rows": len(df),
+        "total_columns" : len(df.columns),
         "prediction_variable": predict_col,
         "model_task_type": task_type,
         "columns": [],
