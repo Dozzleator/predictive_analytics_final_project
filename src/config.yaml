@@ -1,0 +1,21 @@
+imputation:
+  - 'mean'
+  - 'most_frequent'
+  - 'median'
+
+scaling:
+  - 'standard'
+  - 'robust'
+  - 'none'
+
+encoding:
+  - 'one_hot'
+  - 'ordinal'
+
+models:
+  classification:
+    - 'random_forest'
+    - 'logistic_regression'
+  regression:
+    - 'random_forest'
+    - 'linear_regression'

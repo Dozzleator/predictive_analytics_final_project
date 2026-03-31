@@ -1,21 +1,23 @@
 import json
-import time
-# from ai_call_api import call_lm_api
-from ai_call_local import call_lm_local
+from read_config import read_config
 from data_scan import read_csv, scan_df
-from validator import result_validator
+from pipeline_builder import optimal_pipeline
+from ai_explainer import populate_full_justifications
 
 def main() -> None:
     # Set run parameters
-    max_ai_calls = 1
-    model_function = call_lm_local
-    input_dir = "student_dropout_data/student_dropout_dataset.csv"
+    input_dir = "simple_linear_regression/india_population.csv"
+    n_trials = 100
+    path_config = r"config.yaml"
 
     # Starting program
     print("""\n\033[92mStarting Program\033[00m""")
 
+    # load in config
+    config = read_config(path_config)
+
     # Column used for predictions
-    target_column = "Study_Hours_per_Day"
+    target_column = "median_age"
 
     # Read in CSV data
     df = read_csv(input_dir)
@@ -27,16 +29,32 @@ def main() -> None:
     print(f"\n\033[93mPrinting Meta-data that will be sent to LLM:\033[00m")
     print(json.dumps(df_metadata, indent= 4))
 
-    # Initilise the results validator
-    model_start = time.time()
-    print(f"\n\033[94mStarting recommendation generation\033[00m")
-    validated_json = result_validator(df, {}, target_column, df_metadata)
-    final_plan, attempts = validated_json.run_validator(model_function, max_ai_calls)
-    model_end = time.time() - model_start
-    print(f"\n** Model took {model_end:.2f} seconds to generate results **")
-    print(f"\n\033[94mPrinting final model recomendations:\033[00m")
-    print(json.dumps(final_plan, indent= 4))
-    print(f"\n Model validated dataset with {attempts} attempts")
+    # Run optimser iterativley until the score threshold is higher then 60% 
+    print(f'\n\033[94mRunning Optuna Search ({n_trials} trials)...\033[00m')
+    recommendations, metadata_df = optimal_pipeline(
+        df=df, 
+        target_col=target_column, 
+        meta_data=df_metadata, 
+        config=config,
+        n_trials=n_trials
+    )
+
+    # Display Optuna Results
+    # Convert dataset metadata dict to string once for the LLM
+    print('\n\033[95mPipeline Action Log (Metadata Table):\033[00m')
+    print(metadata_df.to_string(index=False))
+
+    print('\n\033[93mGenerating AI Consultant Explanations for Top 3 Pipelines...\033[00m')
+    
+    # build pipeline and get recomendations from llm
+    final_report = populate_full_justifications(recommendations, df_metadata)
+
+    # Output Results
+    print('\n\033[92mFinal Justified Report Generated:\033[00m')
+    print(json.dumps(final_report, indent=4))
+
+    print('\n\033[96mPipeline Action Log (Metadata Table):\033[00m')
+    print(metadata_df.to_string(index=False))
 
     return None
 

@@ -3,7 +3,7 @@ import pandas as pd
 import json
 from data_scan import scan_df
 from ai_call_local import call_lm_local
-# from ai_call_api import call_lm_api
+# from ai_call_api import call_lm_api as call_lm_local
 from validator import result_validator
 from typing import Callable
 
@@ -69,7 +69,7 @@ def build_csv_uploader() -> tuple[pd.DataFrame, str, int, int]:
             st.info("Please input name of the column you wish to predict to continue")
             st.stop()
 
-        input_attempts = st.slider('Select amount of times for iterative validation attempts (as runs locally more will consume more memory)', 1, 20, 10)
+        input_attempts = st.slider('Select amount of times for iterative validation attempts (as runs locally more will consume more memory)', 1, 10, 5)
         run_attempts = input_attempts
     return df, target_col, run_attempts, input_attempts
 
@@ -195,7 +195,6 @@ def build_LLM_validator(df: pd.DataFrame, meta_data: json, target_col: str, LLM_
                     status.update(label= f"Sucessfully validated in {run_attempts} attempts")
                 else:
                     status.update(label=f"Could not validate in {input_attempts} attempts, returning results of final run")
-                st.subheader("Final pipeline of recommendations")
                 st.json(recommendations)
                 st.session_state.recommendations = recommendations
             except Exception as e:
