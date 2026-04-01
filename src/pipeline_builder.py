@@ -76,7 +76,7 @@ def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame
 
     return score
 
-def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config: dict, n_trials: int) -> tuple[float, dict, pd.DataFrame]:
+def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config: dict, n_trials: int) -> tuple[dict, pd.DataFrame]:
     '''Automatically builds pipelines based on first prompted suggrstions'''
 
     # Remove rows where target col is N/A
@@ -104,64 +104,129 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
     trials = study.get_trials(deepcopy=False, states=[optuna.trial.TrialState.COMPLETE])
     trials.sort(key=lambda t: t.value, reverse=True)
 
-    # Initialise the structured results 
-    full_recommendation = {
-        'global_strategies': [],
-        'column_strategies': []
-    }
-
-# Extract unique models from top trials, limited to top 3
-    unique_models = list(dict.fromkeys([t.params['model_type'] for t in trials]))[:3]
-
     # Build top three recommendations for global selections
-    full_recommendation['global_strategies'].append({
-        'category': 'Model Selection',
-        'model_options': [m.replace('_', ' ').title() for m in unique_models],
-        'cv_recommendations': 'kfold',
-        'cv_folds': 5,
-        'justification': ''
-    })
+    full_recommendation = {
+        'target_column' : target_col,
+        'task_type' : 'classification' if is_classification else 'regression',
+        'pipeline_options' : []
+    }
 
     # tracking_data list to build the metadata_df
     tracking_list = []
 
-    for col in x.columns:
-        is_num = np.issubdtype(x[col].dtype, np.number)
+    # Seperate column by type
+    num_cols = [col for col in x.columns if np.issubdtype(x[col].dtype, np.number)]
+    cat_cols = [col for col in x.columns if not np.issubdtype(x[col].dtype, np.number)]
 
-        # build columnwise dictionary for top three recomendations
-        col_rec = {
-            'column_name': col,
-            'imputation_options': [],
-            'scaling_options': [],
-            'encoding_options': [],
-            'reasoning': ''
-        }
+    # convert list into dict lookup
+    col_lookup = {}
+    for col_info in meta_data.get('columns', []):
+        col_name = col_info.get('name')
+        if col_name:
+            col_lookup[col_name] = col_info
 
-        # Build the structured dict for the LLM and the tracking list for the UI table
-        for t in trials[:3]:
-            params = t.params
-            score = t.value
-            
-            # Map parameters based on type
-            col_impute = params['num_impute'] if is_num else 'most_frequent'
-            col_scale = params['num_scale'] if is_num else 'none'
-            col_encode = 'none' if is_num else params['cat_encode']
+    # Create results and append to dict building the pipelines by top 3 ranking
+    for rank, t in enumerate(trials[:3], start=1):
+        params = t.params
+        score = t.value
 
-            col_rec['imputation_options'].append({'technique': col_impute, 'justification': ''})
-            col_rec['scaling_options'].append({'technique': col_scale, 'justification': ''})
-            col_rec['encoding_options'].append({'technique': col_encode, 'justification': ''})
+        # Find if column is actually missing data 
+        num_cols_missing = [c for c in num_cols if col_lookup.get(c, {}).get('missing_values', 0) > 0]
+        num_cols_clean = [c for c in num_cols if c not in num_cols_missing]
+        
+        cat_cols_missing = [c for c in cat_cols if col_lookup.get(c, {}).get('missing_values', 0) > 0]
+        cat_cols_clean = [c for c in cat_cols if c not in cat_cols_missing]
 
-            # Add to the flat tracking list for the metadata_df
-            tracking_list.append({
-                'Column': col,
-                'Score': f'{score:.4f}',
-                'Imputation': col_impute,
-                'Scaling': col_scale,
-                'Encoding': col_encode,
-                'Model': params['model_type'].replace('_', ' ').title()
+        # Buid dynamic strategy list for numerical columns
+        num_impute_strat = []
+        if num_cols_missing: 
+            num_impute_strat.append({
+                'strategy' : params['num_impute'],
+                'columns' : num_cols_missing
+            })
+        if num_cols_clean:
+            num_impute_strat.append({
+                'strategy' : 'none',
+                'columns' : num_cols_clean
             })
 
-        full_recommendation['column_strategies'].append(col_rec)
+        # Buid dynamic strategy list for categorical columns
+        cat_impute_strat = []
+        if cat_cols_missing: 
+            cat_impute_strat.append({
+                'strategy' : 'most_frequent',
+                'columns' : cat_cols_missing
+            })
+        if cat_cols_clean:
+            cat_impute_strat.append({
+                'strategy' : 'none',
+                'columns' : cat_cols_clean
+            })
+
+        # build the output dictionary
+        pipeline_config = {
+            'rank' : rank,
+            'score': f'{score:.4f}',
+            'model' : params['model_type'].replace('_', ' ').title(),
+            'justification' : '',
+            'transformations' : [
+                {
+                    'feature_type' : 'numeric',
+                    'imputation' : num_impute_strat,
+                    'scaling' : [{
+                        'strategy' : params['num_scale'],
+                        'columns' : num_cols,
+                        'justification' : ''
+                    }] if num_cols else [],
+                    'encoding' : [{
+                        'strategy' : 'none',
+                        'columns' : num_cols,
+                        'justification' : ''
+                    }] if num_cols else [],
+                },
+                {
+                    'feature_type' : 'categorical',
+                    'imputation' : cat_impute_strat,
+                    'scaling' : [{
+                        'strategy' : 'none',
+                        'columns' : cat_cols
+                    }] if cat_cols else [],
+                    'encoding' : [{
+                        'strategy' : params['cat_encode'],
+                        'columns' : cat_cols,
+                        'justification' : ''
+                    }] if cat_cols else [],
+                },
+            ],
+        }
+
+        # Append recommendations back to dict
+        full_recommendation['pipeline_options'].append(pipeline_config)
+
+        # Build into flat table for comprehenssion
+        for col in x.columns:
+            is_num = np.issubdtype(x[col].dtype, np.number)
+            has_missing = col_lookup.get(col, {}).get('missing_values', 0) > 0
+
+            # Look for actual applied transformations 
+            if is_num:
+                actual_impute = params['num_impute'] if has_missing else 'none'
+                col_scale = params['num_scale']
+                col_encode = 'none'
+            else: 
+                actual_impute = 'most_frequent' if has_missing else 'none'
+                col_scale = 'none'
+                col_encode = params['cat_encode']
+
+            tracking_list.append({
+                'Rank' : rank,
+                'Column' : col,
+                'Score' : f'{score:.4f}',
+                'Imputation' : actual_impute,
+                'Scaling' : col_scale,
+                'Encoding' : col_encode,
+                'Model' : params['model_type'].replace('_', ' ').title()
+            })
 
     metadata_df = pd.DataFrame(tracking_list)
     return full_recommendation, metadata_df
