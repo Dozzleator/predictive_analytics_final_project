@@ -76,7 +76,7 @@ def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame
 
     return score
 
-def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config: dict, n_trials: int) -> tuple[dict, pd.DataFrame]:
+def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config: dict, target_accuracy: int, max_trials: int) -> tuple[dict, pd.DataFrame]:
     '''Automatically builds pipelines based on first prompted suggrstions'''
 
     # Remove rows where target col is N/A
@@ -97,8 +97,25 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     study = optuna.create_study(direction='maximize')
 
-    # pass vriavles into function with lambda
-    study.optimize(lambda trial: build_optuna_objective(trial, x, y, is_classification, config), n_trials= n_trials)
+    # Pull variables for search (set by user)
+    target_dec = float(target_accuracy / 100)
+    trial_runs = 0
+
+    # Optimise within the trial limit
+    while trial_runs < max_trials:
+        # Create study to find optimal pipeline
+        trial = study.ask()
+
+        # Build study for each variation per trial
+        score = build_optuna_objective(trial, x, y, is_classification, config)
+
+        # Get result and feed back to optimiser for subsequent runs
+        study.tell(trial, score)
+
+        # Stop program if runs exced maximum trial runs (stops infinant looping)
+        trial_runs += 1
+        if len(study.trials) > 0 and study.best_value >= target_dec: 
+            break
 
     # find and sort the completed trials
     trials = study.get_trials(deepcopy=False, states=[optuna.trial.TrialState.COMPLETE])

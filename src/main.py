@@ -7,7 +7,8 @@ from ai_explainer import populate_full_justifications
 def main() -> None:
     # Set run parameters
     input_dir = "simple_linear_regression/india_population.csv"
-    n_trials = 100
+    n_trials = 1000
+    target_accuracy = 75
     path_config = r"config.yaml"
 
     # Starting program
@@ -36,7 +37,8 @@ def main() -> None:
         target_col=target_column, 
         meta_data=df_metadata, 
         config=config,
-        n_trials=n_trials
+        target_accuracy= target_accuracy,
+        max_trials=n_trials
     )
 
     # Display Optuna Results
