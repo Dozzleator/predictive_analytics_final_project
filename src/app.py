@@ -69,10 +69,8 @@ def build_csv_uploader() -> tuple[pd.DataFrame, str, int, int]:
             st.info("Please input name of the column you wish to predict to continue")
             st.stop()
 
-        input_attempts = st.slider('Select amount of times for iterative validation attempts (as runs locally more will consume more memory)', 1, 10, 5)
-        run_attempts = input_attempts
-    return df, target_col, run_attempts, input_attempts
-
+    return df, target_col
+ 
 def build_dataset_overview(df: pd.DataFrame, target_col: str) -> json:
     # Create view of metadata pulled from table
     st.subheader("Overview of Metadata")
@@ -177,8 +175,8 @@ def build_pipeline_optimisation(df: pd.DataFrame, meta_data: dict, target_col: s
     '''Runs bayesian optimisations and finds ideal pipeline (also calls LLM to generate justifications)'''
 
     # Create a new season state to hold the resulting output of optimisation
-    if 'recomendations' not in st.session_state:
-        st.session_state.reccomendations = None
+    if 'recommendations' not in st.session_state:
+        st.session_state.recommendations = None
     if 'metadata_df' not in st.session_state:
         st.session_state.metadata_df = None
 
@@ -218,13 +216,13 @@ def build_pipeline_optimisation(df: pd.DataFrame, meta_data: dict, target_col: s
 
     # Build button to begin optimisation
     if st.button("Generate Optimised Pipeline"):
-        with st.status('Building optimised machine learning pipeline'):
+        with st.status('Building optimised machine learning pipeline', expanded= True) as status:
             try:
                 # Write out message to display optimisation target
                 st.write(f'Executing pipeline automisation search for a score of {target_accuracy:.2f}')
 
                 # Run optimiser through imported function from "pipeline_builder.py"
-                recommendation_raw, metadata_df = build_pipeline_optimisation(
+                recommendation_raw, metadata_df = optimal_pipeline(
                     df= df,
                     target_col= target_col,
                     meta_data= meta_data,
@@ -240,11 +238,14 @@ def build_pipeline_optimisation(df: pd.DataFrame, meta_data: dict, target_col: s
                 st.session_state.recommendations = final_recommendations
                 st.session_state.metadata_df = metadata_df
             
-                max_score = max(final_recommendations.get('score'), [])
-                st.status.update(label=f"Successfully found the top three pipelines with the highest score of {max_score}", state='complete')
+                # Safely extract the score from the very first (highest ranked) pipeline
+                top_score = final_recommendations.get('pipeline_options', [{}])[0].get('score', 'Unknown')
+
+                # Update the status box using the extracted score
+                status.update(label=f"Successfully found the top pipelines with a highest score of {top_score}", state='complete')
 
             except Exception as e:
-                st.status.update(label="Optimisation Failed", state='error')
+                status.update(label="Optimisation Failed", state='error')
                 st.error(f"Encountered error: {e} during optimisation process")
 
     return st.session_state.recommendations
@@ -261,12 +262,86 @@ def build_reset_button() -> None:
             st.cache_data.clear()
             st.rerun()
 
-def main() -> None: 
+def display_results_timeline(recommendations: dict) -> None:
+    '''Displays results of the optimisation in sorted pipelines'''
+
+    # Do not run if no recommendations have been generated
+    if not recommendations:
+        return
+
+    # Create the header for this stremlitt section
+    st.divider()
+    st.header('Top Three Pipelines')
+    st.write(f'Target variable: **{recommendations.get('target_column', 'Error')}** | Task type: **{recommendations.get('task_type', 'Error')}**')
+
+    # Pull out pipeline options from the recommendations
+    pipeline_options = recommendations.get('pipeline_options', [])
+
+    # Return if no valid pipelines found
+    if not pipeline_options:
+        st.warning('Error: No valid pipelines found')
+        return
+
+    # Create dynamic tabs
+    tab_titles = [f'Rank {pipeline['rank']} (Score: {pipeline['score']})' for pipeline in pipeline_options]
+    tabs = st.tabs(tab_titles)
+
+    # Create timelines for pipelines iteravly
+    for tab, pipeline in zip(tabs, pipeline_options):
+        with tab:
+
+            # Headers for pipelines
+            st.subheader(f'Algorythm selected: {pipeline['model']}')
+            st.info(f"**Consultant Reasoning:** {pipeline['justification']}")
+
+            st.markdown("---")
+            st.markdown("### Recommended features pipeline")
+            
+            # Iterate through Numeric and Categorical transformations
+            for trans in pipeline.get('transformations', []):
+                feat_type = trans.get('feature_type', '').title()
+                
+                # Only display the section if there are actually columns of this type
+                has_imputation = any(imp['strategy'] != 'none' for imp in trans.get('imputation', []))
+                has_scaling = any(scl['strategy'] != 'none' for scl in trans.get('scaling', []))
+                has_encoding = any(enc['strategy'] != 'none' for enc in trans.get('encoding', []))
+                
+                # skip if no transformation methods suggested
+                if not (has_imputation or has_scaling or has_encoding):
+                    continue
+                    
+                st.markdown(f"#### {feat_type} Variables")
+                
+                # Imputation Timeline
+                for imp in trans.get('imputation', []):
+                    if imp['strategy'] != 'none':
+                        st.markdown(f"**Step 1: Missing Value Imputation** (`{imp['strategy']}`)")
+                        st.caption(f"Applied to features: [{', '.join(imp['columns'])}]")
+                        st.success(imp.get('justification', 'Mathematical transformation applied.'))
+                        
+                # Scaling Timeline
+                for scl in trans.get('scaling', []):
+                    if scl['strategy'] != 'none':
+                        st.markdown(f"**Step 2: Feature Scaling** (`{scl['strategy']}`)")
+                        st.caption(f"Applied to features: [{', '.join(scl['columns'])}]")
+                        st.success(scl.get('justification', 'Mathematical transformation applied.'))
+                        
+                # Encoding Timeline
+                for enc in trans.get('encoding', []):
+                    if enc['strategy'] != 'none':
+                        st.markdown(f"**Step 3: Categorical Encoding** (`{enc['strategy']}`)")
+                        st.caption(f"Applied to features: [{', '.join(enc['columns'])}]")
+                        st.success(enc.get('justification', 'Mathematical transformation applied.'))
+                
+                st.write("")
+    return None
+
+def main() -> None:  
     # Build initial sets basic things for streamlit UI
     build_initial()
 
     # Build CSV uploader to take user data (also defines target col and amount of validator runs)
-    df, target_col, run_attempts, input_attempts = build_csv_uploader()
+    df, target_col = build_csv_uploader()
 
     # Read in config file
     config = read_config(r'config.yaml')
@@ -277,6 +352,9 @@ def main() -> None:
 
         # Build the ultimate pipeline and recommendations
         reccomendation_data = build_pipeline_optimisation(df, meta_data, target_col, config)
+
+        # Display results in a timeline
+        display_results_timeline(reccomendation_data)
 
     else:
         st.info('Please upload a .CSV file to begin')
