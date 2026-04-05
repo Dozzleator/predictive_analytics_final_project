@@ -57,13 +57,16 @@ def render_css_timeline(pipeline: dict) -> None:
     step_counter = 1
 
     # Inject if pipeline had logrithmic transformation (non-linear)
-    if pipeline.get('log_transformed'):
-        target_just = pipeline.get('log_transformation_justification', 'Log transformation applied to target.')
-            
+    if pipeline.get('distribution_transformed'):
+        target_just = pipeline.get('Distribution_transformation_justification', 'Distribution transformation applied.')
+
+        # Pull the specific math function for the title (Log1p or Arcsinh)
+        transform_type = pipeline.get('transformation_used', 'Log1p').title()
+
         html_content += f"""<div class="timeline-item">
     <div class="timeline-dot"></div>
     <div class="timeline-content">
-        <h4 class="step-title">Step {step_counter}: Target Transformation (Log1p)</h4>
+        <h4 class="step-title">Step {step_counter}: Target Transformation ({transform_type})</h4>
         <p class="step-caption">Applied to the Target Variable</p>
         <p class="step-justification">"{target_just}"</p>
     </div>

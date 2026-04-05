@@ -300,7 +300,7 @@ def display_results_timeline(recommendations: dict) -> None:
 
     # Return if no valid pipelines found
     if not pipeline_options:
-        st.warning('Error: No valid pipelines found')
+        st.warning('No valid pipelines found (All found pipelines have negative values)')
         return
 
     # Build dynamic tabs for top three pipelines

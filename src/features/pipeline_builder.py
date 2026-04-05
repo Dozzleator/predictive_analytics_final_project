@@ -9,6 +9,16 @@ from sklearn.model_selection import cross_val_score, KFold
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import LogisticRegression, LinearRegression
 
+def safe_expm1(x):
+    """Safely exponentiates arrays, capping values to prevent float64 overflow."""
+    x_float = np.asarray(x, dtype=np.float64)
+    return np.expm1(np.clip(x_float, -700, 700))
+
+def safe_sinh(x):
+    """Safely applies inverse hyperbolic sine, capping values to prevent overflow."""
+    x_float = np.asarray(x, dtype=np.float64)
+    return np.sinh(np.clip(x_float, -700, 700))
+
 def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame, is_classification: bool, config: dict) -> float:
     '''Build and test to find optimal pipeline (Baysian search)'''
     # Get list data from config file
@@ -71,22 +81,36 @@ def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame
         else:
             base_model = LinearRegression()
 
-        # Let optuna dynamically test if Log transformation is required for non-linear distributions
-        use_log_target = trial.suggest_categorical('use_log_target', [True, False])
+        # Let optuna dynamically test if Log transformation is required for non-linear distributions only if values are positive
+        use_target_tranform = trial.suggest_categorical('use_target_tranform', [True, False])
 
-        if use_log_target:
+        if use_target_tranform:
+            if y.min() >= 0:
+                transform_func = np.log1p
+                inverse_func = safe_expm1
+                transform_name = 'log1p'
+            else:
+                transform_func = np.arcsinh
+                inverse_func = safe_sinh
+                transform_name = 'arcsinh'
+
             model = TransformedTargetRegressor(
                 regressor=base_model,
-                func=np.log1p,
-                inverse_func=np.expm1
+                func=transform_func,
+                inverse_func=inverse_func,
+                check_inverse=False
             )
         else:
             model = base_model
+            transform_name = 'none'
 
     # Eveluate pipeline results
     pipeline = Pipeline([('prep', preproccesor), ('model', model)])
     scoring = 'accuracy' if is_classification else 'r2'
     score = cross_val_score(pipeline, x, y, cv=KFold(n_splits=5), scoring=scoring).mean()
+
+    # set transformation name in Optuna
+    trial.set_user_attr('transform_name', transform_name)
 
     return score
 
@@ -197,14 +221,18 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
         # Check if log_trasform happen
         target_transformed = params.get('use_log_target', False)
 
+        # pull transformation name saved to memory in Optuna at end of build func
+        specific_transform = t.user_attrs.get('transform_name', 'none')
+
         # build the output dictionary
         pipeline_config = {
             'rank' : rank,
             'score': f'{score:.4f}',
             'model' : params['model_type'].replace('_', ' ').title(),
             'model_selection_justification' : '',
-            'log_transformed' : target_transformed,
-            'log_transformation_justification' : '',
+            'distribution_transformed' : target_transformed,
+            'transformation_used': specific_transform,
+            'distrabution_transformation_justification' : '',
             'transformations' : [
                 {
                     'feature_type' : 'numeric',

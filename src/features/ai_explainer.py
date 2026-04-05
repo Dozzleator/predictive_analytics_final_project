@@ -37,9 +37,16 @@ def populate_full_justifications(recommendation_skeleton: dict, df_metadata: dic
         pipeline['model_selection_justification'] = call_llm_for_justification(model_ctx, metadata_str)
 
         # Justify Target Transformation if applied (New Block)
-        if pipeline.get('log_transformed'):
-            target_ctx = 'Target Variable Log1p Transformation | Apply log transformation to mitigate extreme right skewness and outliers in the target variable.'
-            pipeline['log_transformation_justification'] = call_llm_for_justification(target_ctx, metadata_str)
+        if pipeline.get('distribution_transformed'):
+            
+            # Pull function used
+            math_func = pipeline.get('transformation_used', 'non-linear').title()
+            
+            # Tell LLM what was done
+            target_ctx = f"Target Variable Transformation | Apply '{math_func}' transformation to the target variable."
+            
+            # Generate justifications for distribution transformation 
+            pipeline['distribution_transformation_justification'] = call_llm_for_justification(target_ctx, metadata_str)
 
         # Iterate through Transformations and justify each step
         for trans in pipeline.get('transformations', []):
