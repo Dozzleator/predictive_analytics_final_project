@@ -1,11 +1,16 @@
+# Import python libraries
 import streamlit as st
 import pandas as pd
 import json
-from typing import Callable
-from read_config import read_config
-from data_scan import scan_df
-from pipeline_builder import optimal_pipeline
-from ai_explainer import populate_full_justifications
+
+# Import features
+from features.read_config import read_config
+from features.data_scan import scan_df
+from features.pipeline_builder import optimal_pipeline
+from features.ai_explainer import populate_full_justifications
+
+# Import ui components
+from ui.timeline_builder import render_css_timeline
 
 def build_initial() -> None:
     '''Build in setreamlit name for program and quick description'''
@@ -282,58 +287,18 @@ def display_results_timeline(recommendations: dict) -> None:
         st.warning('Error: No valid pipelines found')
         return
 
-    # Create dynamic tabs
-    tab_titles = [f'Rank {pipeline['rank']} (Score: {pipeline['score']})' for pipeline in pipeline_options]
+    # Build dynamic tabs for top three pipelines
+    tab_titles = [f'Rank {pipe['rank']} (Score: {pipe['score']})' for pipe in pipeline_options]
     tabs = st.tabs(tab_titles)
 
-    # Create timelines for pipelines iteravly
-    for tab, pipeline in zip(tabs, pipeline_options):
-        with tab:
+    # Iterate through tabs and build pipeleines
+    for tab, pipe in zip(tabs, pipeline_options):
+        with tab: 
+            st.markdown('### Feature Engineering Roadmap')
 
-            # Headers for pipelines
-            st.subheader(f'Algorythm selected: {pipeline['model']}')
-            st.info(f"**Consultant Reasoning:** {pipeline['justification']}")
+            # build pipelines with func from 'timeline_builder.py'
+            render_css_timeline(pipe)
 
-            st.markdown("---")
-            st.markdown("### Recommended features pipeline")
-            
-            # Iterate through Numeric and Categorical transformations
-            for trans in pipeline.get('transformations', []):
-                feat_type = trans.get('feature_type', '').title()
-                
-                # Only display the section if there are actually columns of this type
-                has_imputation = any(imp['strategy'] != 'none' for imp in trans.get('imputation', []))
-                has_scaling = any(scl['strategy'] != 'none' for scl in trans.get('scaling', []))
-                has_encoding = any(enc['strategy'] != 'none' for enc in trans.get('encoding', []))
-                
-                # skip if no transformation methods suggested
-                if not (has_imputation or has_scaling or has_encoding):
-                    continue
-                    
-                st.markdown(f"#### {feat_type} Variables")
-                
-                # Imputation Timeline
-                for imp in trans.get('imputation', []):
-                    if imp['strategy'] != 'none':
-                        st.markdown(f"**Step 1: Missing Value Imputation** (`{imp['strategy']}`)")
-                        st.caption(f"Applied to features: [{', '.join(imp['columns'])}]")
-                        st.success(imp.get('justification', 'Mathematical transformation applied.'))
-                        
-                # Scaling Timeline
-                for scl in trans.get('scaling', []):
-                    if scl['strategy'] != 'none':
-                        st.markdown(f"**Step 2: Feature Scaling** (`{scl['strategy']}`)")
-                        st.caption(f"Applied to features: [{', '.join(scl['columns'])}]")
-                        st.success(scl.get('justification', 'Mathematical transformation applied.'))
-                        
-                # Encoding Timeline
-                for enc in trans.get('encoding', []):
-                    if enc['strategy'] != 'none':
-                        st.markdown(f"**Step 3: Categorical Encoding** (`{enc['strategy']}`)")
-                        st.caption(f"Applied to features: [{', '.join(enc['columns'])}]")
-                        st.success(enc.get('justification', 'Mathematical transformation applied.'))
-                
-                st.write("")
     return None
 
 def main() -> None:  

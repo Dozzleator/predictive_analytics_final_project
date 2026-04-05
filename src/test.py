@@ -1,8 +1,8 @@
 import json
-from read_config import read_config
-from data_scan import read_csv, scan_df
-from pipeline_builder import optimal_pipeline
-from ai_explainer import populate_full_justifications
+from features.read_config import read_config
+from features.data_scan import read_csv, scan_df
+from features.pipeline_builder import optimal_pipeline
+from features.ai_explainer import populate_full_justifications
 
 def main() -> None:
     # Set run parameters
