@@ -2,7 +2,7 @@ import optuna
 import numpy as np
 import pandas as pd
 from sklearn.pipeline import Pipeline
-from sklearn.compose import ColumnTransformer, make_column_selector
+from sklearn.compose import ColumnTransformer, make_column_selector, TransformedTargetRegressor
 from sklearn.preprocessing import StandardScaler, RobustScaler, OneHotEncoder, OrdinalEncoder
 from sklearn.impute import SimpleImputer
 from sklearn.model_selection import cross_val_score, KFold
@@ -67,7 +67,19 @@ def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame
                 n_jobs=-1
             )
         else:
-            model = LinearRegression()
+            base_model = LinearRegression()
+
+        # Let optuna dynamically test if Log transformation is required for non-linear distributions
+        use_log_target = trial.suggest_categorical('use_log_target', ['True', 'False'])
+
+        if use_log_target:
+            model = TransformedTargetRegressor(
+                regressor=base_model,
+                func=np.log1p,
+                inverse_func=np.expm1
+            )
+        else:
+            model = base_model
 
     # Eveluate pipeline results
     pipeline = Pipeline([('prep', preproccesor), ('model', model)])
@@ -180,12 +192,17 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
                 'columns' : cat_cols_clean
             })
 
+        # Check if log_trasform happen
+        target_transformed = params.get('use_log_target', False)
+
         # build the output dictionary
         pipeline_config = {
             'rank' : rank,
             'score': f'{score:.4f}',
             'model' : params['model_type'].replace('_', ' ').title(),
-            'justification' : '',
+            'model_selection_justification' : '',
+            'log_transformed' : target_transformed,
+            'log_transformation_justification' : '',
             'transformations' : [
                 {
                     'feature_type' : 'numeric',

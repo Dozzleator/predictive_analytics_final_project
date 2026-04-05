@@ -56,6 +56,21 @@ def render_css_timeline(pipeline: dict) -> None:
     # track the steps to update dynamically where required
     step_counter = 1
 
+    # Inject if pipeline had logrithmic transformation (non-linear)
+    if pipeline.get('log_transformed'):
+        target_just = pipeline.get('log_transformation_justification', 'Log transformation applied to target.')
+            
+        html_content += f"""<div class="timeline-item">
+    <div class="timeline-dot"></div>
+    <div class="timeline-content">
+        <h4 class="step-title">Step {step_counter}: Target Transformation (Log1p)</h4>
+        <p class="step-caption">Applied to the Target Variable</p>
+        <p class="step-justification">"{target_just}"</p>
+    </div>
+</div>
+"""
+        step_counter += 1
+
     # Loop through transformations to dynamically build required steps
     for t in pipeline.get('transformations', []):
         feat_type = t.get('feature_type', '').title()
@@ -90,8 +105,9 @@ def render_css_timeline(pipeline: dict) -> None:
 
                     step_counter += 1
 
+    # Build in model justification to the timeline
     model_name = pipeline.get('model', 'Model')
-    model_justification = pipeline.get('justification', 'Algorithm selected.')
+    model_justification = pipeline.get('model_selection_justification', 'Algorithm selected.')
     
     # Cap the timeline
     html_content += f"""<div class="timeline-item">
