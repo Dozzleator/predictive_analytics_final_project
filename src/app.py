@@ -57,7 +57,7 @@ def build_csv_uploader() -> tuple[pd.DataFrame, str, int, int]:
 
         # Preview table once loaded into UI
         with st.expander("Uploaded .CSV dataset", expanded= True):
-            st.dataframe(df, use_container_width=True, height= 300)
+            st.dataframe(df, width='stretch', height= 300)
 
         # Run settings section of UI
         st.header("Run Input Settings")
@@ -75,7 +75,7 @@ def build_csv_uploader() -> tuple[pd.DataFrame, str, int, int]:
             st.stop()
 
     return df, target_col
- 
+
 def build_dataset_overview(df: pd.DataFrame, target_col: str) -> json:
     # Create view of metadata pulled from table
     st.subheader("Overview of Metadata")
@@ -114,6 +114,9 @@ def build_dataset_overview(df: pd.DataFrame, target_col: str) -> json:
             # Transpose dataframe for readability
             numerical_df = numerical_df.T
 
+            # Set datatyoe to ensure string
+            numerical_df = numerical_df.astype(str)
+
             # Highlight column if is target_col 
             numerical_df = numerical_df.style.apply(
                 lambda col: ['background-color: rgba(130, 224, 145, 0.3)' if col.name == target_col else '' for _ in col], 
@@ -123,7 +126,7 @@ def build_dataset_overview(df: pd.DataFrame, target_col: str) -> json:
             # Build dataframe of how the data should be displayed
             st.dataframe(
                 numerical_df, 
-                use_container_width=True,
+                width= 'stretch',
                 height=400,
                 column_config={
                     'missing_values' : st.column_config.NumberColumn("Null Values"),
@@ -153,6 +156,9 @@ def build_dataset_overview(df: pd.DataFrame, target_col: str) -> json:
             # Drop NAN rows (as something like mean will only have values for numerical columns)
             object_df = object_df.dropna(how='all')
 
+            # Set datatyoe to ensure string
+            object_df = object_df.astype(str)
+
             # Highlight column if is target_col 
             object_df = object_df.style.apply(
                 lambda col: ['background-color: rgba(130, 224, 145, 0.3)' if col.name == target_col else '' for _ in col], 
@@ -162,7 +168,7 @@ def build_dataset_overview(df: pd.DataFrame, target_col: str) -> json:
             # Build dataframe of how the data should be displayed
             st.dataframe(
                 object_df, 
-                use_container_width=True,
+                width= 'stretch',
                 height=400,
                 column_config={
                     'missing_values' : st.column_config.NumberColumn("Null Values"),
@@ -261,7 +267,7 @@ def build_reset_button() -> None:
     st.divider()
     button_space1, button_space2, button_space3 = st.columns([1, 2, 3]) 
     with button_space1:
-        if st.button("Scan New CSV", type = "primary", use_container_width= True):
+        if st.button("Scan New CSV", type = "primary", width='stretch'):
             for key in st.session_state.keys():
                 del st.session_state[key]
             st.cache_data.clear()
@@ -281,6 +287,16 @@ def display_results_timeline(recommendations: dict) -> None:
 
     # Pull out pipeline options from the recommendations
     pipeline_options = recommendations.get('pipeline_options', [])
+
+    # Filter out pipeline if score is less then 0
+    valid_pipelines = []
+    for pipe in pipeline_options:
+        try:
+            if float(pipe.get('score', '0')) > 0:
+                valid_pipelines.append(pipe)
+        except (ValueError, TypeError):
+            continue
+    pipeline_options = valid_pipelines
 
     # Return if no valid pipelines found
     if not pipeline_options:

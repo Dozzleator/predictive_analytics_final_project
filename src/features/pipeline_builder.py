@@ -62,15 +62,17 @@ def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame
     else:
         model_type = trial.suggest_categorical('model_type', reg_models)
         if model_type == 'random_forest':
-            model = RandomForestRegressor(
+            base_model = RandomForestRegressor(
                 max_depth=trial.suggest_int('max_depth', 3, 10),
                 n_jobs=-1
             )
+        elif model_type == 'linear_regression':
+            base_model = LinearRegression()
         else:
             base_model = LinearRegression()
 
         # Let optuna dynamically test if Log transformation is required for non-linear distributions
-        use_log_target = trial.suggest_categorical('use_log_target', ['True', 'False'])
+        use_log_target = trial.suggest_categorical('use_log_target', [True, False])
 
         if use_log_target:
             model = TransformedTargetRegressor(
