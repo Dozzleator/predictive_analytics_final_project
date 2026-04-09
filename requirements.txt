@@ -1,9 +1,0 @@
-Package                   Version
-------------------------- -----------
-numpy                     2.4.4
-ollama                    0.6.1
-optuna                    4.8.0
-pandas                    3.0.2
-PyYAML                    6.0.3
-scikit-learn              1.8.0
-streamlit                 1.56.0
