@@ -52,6 +52,16 @@ def populate_full_justifications(recommendation_skeleton: dict, df_metadata: dic
         for trans in pipeline.get('transformations', []):
             feat_type = trans['feature_type']
 
+            # Justify Feature Selection 
+            for fs in trans.get('feature_selection', []):
+                strat = fs['strategy']
+                if strat != 'none':
+                    cols = ', '.join(fs['columns'])
+                    ctx = f"{feat_type.title()} Feature Selection | Apply '{strat}' to drop columns: [{cols}]"
+                    fs['justification'] = call_llm_for_justification(ctx, metadata_str)
+                else:
+                    fs['justification'] = 'All features retained; no collinearity detected.'
+
             # Justify Imputation
             for imp in trans.get('imputation', []):
                 strat = imp['strategy']

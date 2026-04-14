@@ -192,28 +192,8 @@ def build_pipeline_optimisation(df: pd.DataFrame, meta_data: dict, target_col: s
         st.session_state.metadata_df = None
 
     # Target accuracy slider
-    st.subheader("Set Performance Threshold")
-    st.write("Optimser will search for pipeline that meets the threshold (A higher threshold may take longer)")
-
-    # build slider and seperate if regression or classification
-    if meta_data.get('model_task_type', '') == 'regression':
-        target_accuracy = st.slider(
-            "Minimum Target R²",
-            min_value= 50,
-            max_value= 85,
-            value= 70,
-            step= 1,
-            help="The optimisation engine will execute trials until this score is achieved or the maximum trial limit is reached."
-            )
-    else:
-        target_accuracy = st.slider(
-            "Minimum Target Accuracy",
-            min_value= 50,
-            max_value= 85,
-            value= 70,
-            step= 1,
-            help="The optimisation engine will execute trials until this score is achieved or the maximum trial limit is reached."
-            )
+    st.subheader("Set Iterative Testing Threshold")
+    st.write("In set amount of Iterations (More iterations increases processing time)")
 
     # Create slider to set the max amount of trials to prevent infinant looping 
     max_trials = st.slider(
@@ -230,7 +210,7 @@ def build_pipeline_optimisation(df: pd.DataFrame, meta_data: dict, target_col: s
         with st.status('Building optimised machine learning pipeline', expanded= True) as status:
             try:
                 # Write out message to display optimisation target
-                st.write(f'Executing pipeline automisation search for a score of {target_accuracy:.2f}')
+                st.write(f'Executing pipeline automisation comparing {int(max_trials)} pipeline iterations')
 
                 # Run optimiser through imported function from "pipeline_builder.py"
                 recommendation_raw, metadata_df = optimal_pipeline(
@@ -238,7 +218,6 @@ def build_pipeline_optimisation(df: pd.DataFrame, meta_data: dict, target_col: s
                     target_col= target_col,
                     meta_data= meta_data,
                     config= config,
-                    target_accuracy = target_accuracy,
                     max_trials = max_trials
                 )
 

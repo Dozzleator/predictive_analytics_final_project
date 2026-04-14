@@ -1,4 +1,4 @@
-# StatGuard: Machine Learning Recommender System
+# Machine Learning Recommender System
 
 An automated machine learning validation and recommendation system. This application allows users to upload raw dataset files, automatically optimises preprocessing and modelling pipelines using Bayesian search, and generates natural language justifications for every mathematical decision using a local Large Language Model.
 
