@@ -16,6 +16,9 @@ models:
   classification:
     - 'random_forest'
     - 'logistic_regression'
+    - 'neural_network'
   regression:
     - 'random_forest'
     - 'linear_regression'
+    - 'polynomial_regression'
+    - 'neural_network'

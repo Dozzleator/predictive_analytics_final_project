@@ -1,23 +1,30 @@
 import optuna
 import numpy as np
 import pandas as pd
-from sklearn.pipeline import Pipeline
+import warnings
+from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.compose import ColumnTransformer, make_column_selector, TransformedTargetRegressor
-from sklearn.preprocessing import StandardScaler, RobustScaler, OneHotEncoder, OrdinalEncoder
+from sklearn.preprocessing import StandardScaler, RobustScaler, OneHotEncoder, OrdinalEncoder, PolynomialFeatures
 from sklearn.impute import SimpleImputer
-from sklearn.model_selection import cross_val_score, KFold
+from sklearn.model_selection import cross_val_score, KFold, TimeSeriesSplit
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import LogisticRegression, LinearRegression
+from sklearn.neural_network import MLPClassifier, MLPRegressor
+from sklearn.exceptions import ConvergenceWarning
+
+# Block these warnings from streamlit (they are normal when running optuna optimisations - will work without just comment out if wanting to see warnings)
+warnings.filterwarnings('ignore', category=ConvergenceWarning)
+warnings.filterwarnings('ignore', module='sklearn')
 
 def safe_expm1(x):
     """Safely exponentiates arrays, capping values to prevent float64 overflow."""
     x_float = np.asarray(x, dtype=np.float64)
-    return np.expm1(np.clip(x_float, -700, 700))
+    return np.expm1(np.clip(x_float, -150, 150))
 
 def safe_sinh(x):
     """Safely applies inverse hyperbolic sine, capping values to prevent overflow."""
     x_float = np.asarray(x, dtype=np.float64)
-    return np.sinh(np.clip(x_float, -700, 700))
+    return np.sinh(np.clip(x_float, -150, 150))
 
 def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame, is_classification: bool, config: dict) -> float:
     '''Build and test to find optimal pipeline (Baysian search)'''
@@ -26,10 +33,25 @@ def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame
     scaling_strat = config.get('scaling',[])
     encode_strat = config.get('encoding',[])
 
+    # get model names from the config
+    models_dict = config.get('models', {})
+    class_models = models_dict.get('classification', [])
+    reg_models = models_dict.get('regression', [])
+
+    # Get Optuna to select an algorythm 
+    if is_classification:
+        model_type = trial.suggest_categorical('model_type', class_models)
+    else:
+        model_type = trial.suggest_categorical('model_type', reg_models)
+
     # Define search space (Preprocessing requirements)
     num_impute = trial.suggest_categorical('num_impute', impute_strat)
     num_scale = trial.suggest_categorical('num_scale', scaling_strat)
     cat_encode = trial.suggest_categorical('cat_encode', encode_strat)
+
+    # Only sugest NN if pipeline scaling required
+    if model_type == 'neural_network' and num_scale == 'none':
+        num_scale = 'standard'
 
     # Map strings to functional strategies
     imputer_map = {imp: SimpleImputer(strategy=imp) for imp in impute_strat}
@@ -53,24 +75,35 @@ def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame
         ('cat', Pipeline(cat_steps), make_column_selector(dtype_exclude=np.number))
     ])
 
-    # get model names from the config
-    models_dict = config.get('models', {})
-    class_models = models_dict.get('classification', [])
-    reg_models = models_dict.get('regression', [])
+    # Only use early stopping if input dataset is large enough
+    use_early_stopping = len(x) >= 50
+
+    # Tune max iter for models
+    model_max_iter = 2000
 
     # Sparse search setup / model selection for classification models
     if is_classification:
-        model_type = trial.suggest_categorical('model_type', class_models)
         if model_type == 'random_forest':
             model = RandomForestClassifier(
                 max_depth=trial.suggest_int('max_depth', 3, 10),
                 n_jobs=-1
             )
+        elif model_type == 'neural_network':
+            model = MLPClassifier(
+                solver='lbfgs',
+                hidden_layer_sizes=(
+                    trial.suggest_int('mlp_c_layer_1', 50, 150),
+                    trial.suggest_int('mlp_c_layer_2', 10, 50)
+                ),
+                activation= trial.suggest_categorical('mlp_c_activation', ['relu', 'tanh']),
+                alpha= trial.suggest_float('mlp_c_alpha', 1e-4, 1e-1, log=True),
+                max_iter=model_max_iter,
+                early_stopping=use_early_stopping
+            )
         else:
-            model = LogisticRegression(max_iter=1000)
+            model = LogisticRegression(max_iter=model_max_iter)
     # For regression models
     else:
-        model_type = trial.suggest_categorical('model_type', reg_models)
         if model_type == 'random_forest':
             base_model = RandomForestRegressor(
                 max_depth=trial.suggest_int('max_depth', 3, 10),
@@ -78,11 +111,29 @@ def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame
             )
         elif model_type == 'linear_regression':
             base_model = LinearRegression()
+        elif model_type == 'polynomial_regression':
+            poly_degree = trial.suggest_int('poly_degree', 2, 3)
+            base_model = make_pipeline(
+                PolynomialFeatures(degree=poly_degree, include_bias=False),
+                LinearRegression()
+            )
+        elif model_type == 'neural_network':
+            base_model = MLPRegressor(
+                solver='lbfgs',
+                hidden_layer_sizes=(
+                    trial.suggest_int('mlp_r_layer_1', 50, 150),
+                    trial.suggest_int('mlp_r_layer_2', 10, 50)
+                ),
+                activation=trial.suggest_categorical('mlp_r_activation', ['relu', 'tanh']),
+                alpha=trial.suggest_float('mlp_r_alpha', 1e-4, 1e-1, log=True),
+                max_iter= model_max_iter,
+                early_stopping=use_early_stopping
+            )
         else:
             base_model = LinearRegression()
 
         # Let optuna dynamically test if Log transformation is required for non-linear distributions only if values are positive
-        use_target_tranform = trial.suggest_categorical('use_target_tranform', [True, False])
+        use_target_tranform = trial.suggest_categorical('use_target_transform', [True, False])
 
         if use_target_tranform:
             if y.min() >= 0:
@@ -107,7 +158,16 @@ def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame
     # Eveluate pipeline results
     pipeline = Pipeline([('prep', preproccesor), ('model', model)])
     scoring = 'accuracy' if is_classification else 'r2'
-    score = cross_val_score(pipeline, x, y, cv=KFold(n_splits=5), scoring=scoring).mean()
+
+    # Detect if time series and change val strat as required
+    time_cols = [col for col in x.columns if 'year' in col.lower() or 'date' in col.lower()]
+
+    if time_cols:
+        cv_strategy = TimeSeriesSplit(n_splits=5)
+    else:
+        cv_strategy = KFold(n_splits=5, shuffle= True, random_state=42)
+
+    score = cross_val_score(pipeline, x, y, cv=cv_strategy, scoring=scoring).mean()
 
     # set transformation name in Optuna
     trial.set_user_attr('transform_name', transform_name)
@@ -159,6 +219,21 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
     trials = study.get_trials(deepcopy=False, states=[optuna.trial.TrialState.COMPLETE])
     trials.sort(key=lambda t: t.value, reverse=True)
 
+    # Filter out duplicate pipelines
+    unique_trials = []
+    seen_scores = set()
+    
+    # Appen scores to seen_scors as rounded values (put into set to stop duplications)
+    for t in trials:
+        rounded_score = round(t.value, 4)
+        if rounded_score not in seen_scores:
+            unique_trials.append(t)
+            seen_scores.add(rounded_score)
+
+        # Stop optimisation when top-3 pipelines have been found
+        if len(unique_trials) == 3:
+            break
+
     # Build top three recommendations for global selections
     full_recommendation = {
         'target_column' : target_col,
@@ -181,7 +256,7 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
             col_lookup[col_name] = col_info
 
     # Create results and append to dict building the pipelines by top 3 ranking
-    for rank, t in enumerate(trials[:3], start=1):
+    for rank, t in enumerate(unique_trials, start=1):
         params = t.params
         score = t.value
 
@@ -219,7 +294,7 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
             })
 
         # Check if log_trasform happen
-        target_transformed = params.get('use_log_target', False)
+        target_transformed = params.get('use_target_transform', False)
 
         # pull transformation name saved to memory in Optuna at end of build func
         specific_transform = t.user_attrs.get('transform_name', 'none')
@@ -232,7 +307,7 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
             'model_selection_justification' : '',
             'distribution_transformed' : target_transformed,
             'transformation_used': specific_transform,
-            'distrabution_transformation_justification' : '',
+            'distribution_transformation_justification' : '',
             'transformations' : [
                 {
                     'feature_type' : 'numeric',
