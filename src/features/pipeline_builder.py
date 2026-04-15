@@ -6,7 +6,7 @@ from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.compose import ColumnTransformer, make_column_selector, TransformedTargetRegressor
 from sklearn.preprocessing import StandardScaler, RobustScaler, OneHotEncoder, OrdinalEncoder, PolynomialFeatures
 from sklearn.impute import SimpleImputer
-from sklearn.model_selection import cross_val_score, KFold, TimeSeriesSplit
+from sklearn.model_selection import cross_val_score, KFold, cross_validate
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.neural_network import MLPClassifier, MLPRegressor
@@ -149,8 +149,23 @@ def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame
     # Define the validation strategy
     cv_strategy = KFold(n_splits=5, shuffle=True, random_state=42)
 
-    score = cross_val_score(pipeline, x, y, cv=cv_strategy, scoring=scoring).mean()
+    # Use_cross_vlaidate to extract training and testing performance 
+    cv_results = cross_validate(pipeline, x, y, cv=cv_strategy, scoring=scoring, return_train_score=True)
+
+    # Pull test and train score
+    test_score = cv_results['test_score'].mean()
+    train_score = cv_results['train_score'].mean()
+
+    # Find variance between fitment
+    variance = abs(train_score - test_score)
+
+    score = test_score - (variance * 0.5)
+
+#    Save the raw metrics to the trial memory so can be extracted
     trial.set_user_attr('transform_name', transform_name)
+    trial.set_user_attr('test_score', test_score)
+    trial.set_user_attr('train_score', train_score)
+    trial.set_user_attr('variance', variance)
 
     return score
 
@@ -159,6 +174,10 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
     
     # Drop rows that have null values on the predictor column
     df = df.dropna(subset=[target_col])
+
+    # Remove non needed columns
+    col_to_drop = [c for c in df.columns if 'Unnamed: 0' in c or c == '' or ' ' in c]
+    df = df.drop(columns= col_to_drop)
 
     # Automatic collinearity transformation
     dropped_cols = []
@@ -274,13 +293,22 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
         if cat_cols_clean:
             cat_impute_strat.append({'strategy' : 'none', 'columns' : cat_cols_clean})
 
+        # Extract transformation logic
         target_transformed = params.get('use_target_transform', False)
         specific_transform = t.user_attrs.get('transform_name', 'none')
+
+        # Extract score information
+        test_score = t.user_attrs.get('test_score', score)
+        train_score = t.user_attrs.get('train_score', score)
+        variance = t.user_attrs.get('variance', 0)
 
         # build pipeline dictionary (needed to log transformations and model selection)
         pipeline_config = {
             'rank' : rank,
             'score': f'{score:.4f}',
+            'test_score': f'{test_score:.4f}',
+            'train_score': f'{train_score:.4f}',
+            'fit_variance': f'{variance:.4f}',
             'model' : params['model_type'].replace('_', ' ').title(),
             'model_selection_justification' : '',
             'distribution_transformed' : target_transformed,

@@ -291,6 +291,34 @@ def display_results_timeline(recommendations: dict) -> None:
         with tab: 
             st.markdown('### Feature Engineering Roadmap')
 
+            # Create columns to show the pipeline metrics
+            st.divider()
+            st.markdown('**Pipeline Scoring**')
+            m1, m2, m3 = st.columns(3)
+
+            # Pukk out scores from pipeline dictionary
+            test_score = pipe.get('test_score', 'N/A')
+            train_score = pipe.get('train_score', 'N/A')
+            variance = pipe.get('fit_variance', 'N/A')
+
+            with m1:
+                st.metric(label='Test Score (Unseen Data)', value=test_score)
+            with m2:
+                st.metric(label='Train Score (Seen Data)', value=train_score)
+            with m3:
+                # Use delta to visually show the variance as a negative drop
+                variance_str = f'-{variance}' if variance != 'N/A' else None
+                st.metric(
+                    label='Fitment Variance', 
+                    value=variance, 
+                    delta=variance_str, 
+                    delta_color='inverse'
+                )
+
+            st.divider()
+
+            st.markdown('### Feature Engineering Roadmap')
+
             # build pipelines with func from 'timeline_builder.py'
             render_css_timeline(pipe)
 
