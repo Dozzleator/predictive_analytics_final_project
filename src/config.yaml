@@ -11,14 +11,25 @@ scaling:
 encoding:
   - 'one_hot'
   - 'ordinal'
+  - 'ordinal'
+
+balancing:
+  - 'none'
+  - 'smote'
+  - 'undersample'
 
 models:
   classification:
     - 'random_forest'
     - 'logistic_regression'
     - 'neural_network'
+    - 'gradient_boost_classifier'
+    - 'knn'
+    - 'extra_tree_classifier'
+    - 'svc'
   regression:
     - 'random_forest'
     - 'linear_regression'
     - 'polynomial_regression'
     - 'neural_network'
+    - 'gradient_boost_regressor'

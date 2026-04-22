@@ -55,6 +55,11 @@ def build_csv_uploader() -> tuple[pd.DataFrame, str, int, int]:
         df = st.session_state.df
         df_cols = df.columns.to_list()
 
+        # If empty columns or 'Unammed: 0' drop as this is useless
+        cols_to_drop = [c for c in df.columns if 'Unnamed' in c or c.strip() == '']
+        if cols_to_drop:
+            df = df.drop(columns=cols_to_drop)
+
         # Preview table once loaded into UI
         with st.expander("Uploaded .CSV dataset", expanded= True):
             st.dataframe(df, width='stretch', height= 300)

@@ -3,12 +3,22 @@ import ollama
 def call_llm_for_justification(context_data: str, df_metadata: str) -> str:
     '''Calls Llama 3.2 3B to provide a targeted, 1-sentence justification.'''
     
+    if 'Validation Strategy' in context_data:
+        focus = 'Focus strictly on why this validation strategy prevents overfitting and ensures evaluation integrity. Do NOT mention specific columns.'
+    elif 'Model' in context_data:
+        focus = 'Focus strictly on why this mathematical algorithm suits the dataset size and complexity.'
+    elif 'Smote' in context_data or 'Undersample' in context_data:
+        focus = 'Focus strictly on why manipulating the dataset distribution with this balancing strategy prevents the model from developing a majority-class bias.'
+    else:
+        focus = 'Focus strictly on data types, missing values, outliers, or model mechanics for the specified columns.'
+
     prompt = (
         'You are a Senior Data Science Consultant for StatGuard. '
         'Based on the provided dataset metadata, write a single, professional sentence '
         '(under 25 words) explaining WHY this specific decision was made for these exact columns.\n\n'
         f'DATASET CONTEXT:\n{df_metadata}\n\n'
         f'DECISION TO JUSTIFY:\n{context_data}\n\n'
+        f'{focus}\n'
         'Focus strictly on data types, missing values, outliers, or model mechanics. '
         'Output the plain justification text only. No intro, no filler.'
     )
@@ -36,7 +46,17 @@ def populate_full_justifications(recommendation_skeleton: dict, df_metadata: dic
         model_ctx = f"Algorithm Selected: {model_name}"
         pipeline['model_selection_justification'] = call_llm_for_justification(model_ctx, metadata_str)
 
-        # Justify Target Transformation if applied (New Block)
+        # Justify chosen class balancing strategy
+        balance_strat = pipeline.get('class_balancing_strategy', 'None')
+        if balance_strat != 'None':
+            pipeline['class_balancing_justification'] = call_llm_for_justification(f"Class Balancing Strategy: {balance_strat}", df_metadata)
+
+        # Justify Validation Strategy
+        val_strategy = pipeline.get('validation_strategy', 'Error')
+        val_ctx = f'Validation Strategy Selected: {val_strategy}'
+        pipeline['validation_justification'] = call_llm_for_justification(val_ctx, metadata_str)
+
+        # Justify Target Transformation if applied
         if pipeline.get('distribution_transformed'):
             
             # Pull function used

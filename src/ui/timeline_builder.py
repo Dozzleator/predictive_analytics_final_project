@@ -108,11 +108,28 @@ def render_css_timeline(pipeline: dict) -> None:
 
                     step_counter += 1
 
+# Build Class Balancing into the frontend timeline
+    balance_strat = pipeline.get('class_balancing_strategy', 'None')
+    balance_just = pipeline.get('class_balancing_justification', '')
+
+    # Only draw this HTML block if a balancing strategy was actually applied
+    if 'None' not in balance_strat:
+        html_content += f"""<div class="timeline-item">
+        <div class="timeline-dot"></div>
+        <div class="timeline-content">
+            <h4 class="step-title">Step {step_counter}: Class Balancing</h4>
+            <p class="step-caption">Applied Strategy: {balance_strat}</p>
+            <p class="step-justification">"{balance_just}"</p>
+        </div>
+    </div>
+    """
+        step_counter += 1
+
     # Build in model justification to the timeline
     model_name = pipeline.get('model', 'Model')
     model_justification = pipeline.get('model_selection_justification', 'Algorithm selected.')
     
-    # Cap the timeline
+    # Add in model step
     html_content += f"""<div class="timeline-item">
     <div class="timeline-dot"></div>
     <div class="timeline-content">
@@ -121,8 +138,25 @@ def render_css_timeline(pipeline: dict) -> None:
         <p class="step-justification">"{model_justification}"</p>
     </div>
 </div>
-</div>
 """
+
+    step_counter += 1
+
+    # Pull validation strategies
+    val_strat = pipeline.get('validation_strategy', 'Standard Cross Validation')
+    val_just = pipeline.get('validation_justification', '')
+
+    # Add in validation step
+    html_content += f'''<div class="timeline-item">
+    <div class="timeline-dot"></div>
+    <div class="timeline-content">
+        <h4 class="step-title">Step {step_counter}: Pipeline Validation</h4>
+        <p class="step-caption">Evaluated using {val_strat}</p>
+        <p class="step-justification">"{val_just}"</p>
+    </div>
+</div>
+</div>
+'''
 
     # Allow for html injection
     st.markdown(html_content, unsafe_allow_html=True)

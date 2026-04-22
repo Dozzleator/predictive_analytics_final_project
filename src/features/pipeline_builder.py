@@ -2,15 +2,21 @@ import optuna
 import numpy as np
 import pandas as pd
 import warnings
+from imblearn.pipeline import Pipeline as ImbPipeline
+from imblearn.over_sampling import SMOTE
+from imblearn.under_sampling import RandomUnderSampler
+from features.ai_model_recommender import get_dynamic_model_recommendations
 from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.compose import ColumnTransformer, make_column_selector, TransformedTargetRegressor
 from sklearn.preprocessing import StandardScaler, RobustScaler, OneHotEncoder, OrdinalEncoder, PolynomialFeatures
 from sklearn.impute import SimpleImputer
-from sklearn.model_selection import cross_val_score, KFold, cross_validate
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.model_selection import cross_val_score, KFold, cross_validate, StratifiedKFold
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor, GradientBoostingClassifier, GradientBoostingRegressor, ExtraTreesClassifier
 from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.neural_network import MLPClassifier, MLPRegressor
 from sklearn.exceptions import ConvergenceWarning
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import SVC
 
 # Block these warnings from streamlit
 warnings.filterwarnings('ignore', category=ConvergenceWarning)
@@ -79,8 +85,9 @@ def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame
 
     if is_classification:
         # Random Forrest Classifier
+        max_tree_depth = 25 if len(x) > 50000 else 10
         if model_type == 'random_forest':
-            model = RandomForestClassifier(max_depth=trial.suggest_int('max_depth', 3, 10), n_jobs=-1)
+            model = RandomForestClassifier(max_depth=trial.suggest_int('max_depth', 5, max_tree_depth), n_jobs=-1)
 
         # MLP Neural Network Classifier
         elif model_type == 'neural_network':
@@ -92,6 +99,43 @@ def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame
                 max_iter=model_max_iter,
                 early_stopping=use_early_stopping
             )
+
+        # Gradient Boost Classifier
+        elif model_type == 'gradient_boost_classifier':
+            model = GradientBoostingClassifier(
+                n_estimators=trial.suggest_int('gb_n_estimators', 50, 300),
+                learning_rate=trial.suggest_float('gb_learning_rate', 0.01, 0.3, log=True),
+                max_depth=trial.suggest_int('gb_max_depth', 3, 9),
+                random_state=42
+            )
+
+        # KNN model
+        elif model_type == 'knn':
+            model = KNeighborsClassifier(
+                n_neighbors=trial.suggest_int('knn_neighbors', 3, 15),
+                weights=trial.suggest_categorical('knn_weights', ['uniform', 'distance']),
+                p=trial.suggest_categorical('knn_p', [1, 2]),
+                n_jobs=-1
+            )
+
+        # Extra Trees model
+        elif model_type == 'extra_tree_classifier':
+            model = ExtraTreesClassifier(
+                n_estimators=trial.suggest_int('et_estimators', 50, 300),
+                max_depth=trial.suggest_int('et_max_depth', 3, max_tree_depth),
+                random_state=42,
+                n_jobs=-1
+            )
+
+        # SCV model
+        elif model_type == 'svc':
+            model = SVC(
+                C=trial.suggest_float('svc_c', 1e-3, 1e3, log=True),
+                kernel=trial.suggest_categorical('svc_kernel', ['linear', 'rbf']),
+                max_iter=model_max_iter,
+                random_state=42
+            )
+
         else:
             model = LogisticRegression(max_iter=model_max_iter)
 
@@ -122,6 +166,16 @@ def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame
                 max_iter=model_max_iter,
                 early_stopping=use_early_stopping
             )
+
+        # Gradiant Boost Regression
+        elif model_type == 'gradient_boost_regressor':
+            base_model = GradientBoostingRegressor(
+                n_estimators=trial.suggest_int('gb_r_n_estimators', 50, 300),
+                learning_rate=trial.suggest_float('gb_r_learning_rate', 0.01, 0.3, log=True),
+                max_depth=trial.suggest_int('gb_r_max_depth', 3, 9),
+                random_state=42
+            )
+
         else:
             base_model = LinearRegression()
 
@@ -142,12 +196,43 @@ def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame
             model = base_model
             transform_name = 'none'
 
-    # Evaluate pipeline results
-    pipeline = Pipeline([('prep', preproccesor), ('model', model)])
-    scoring = 'accuracy' if is_classification else 'r2'
+    if is_classification:
+        # Let Optuna test SMOTE vs Undersampling vs Nothing
+        strat_list = config.get('balancing', [])
+        balance_strat = trial.suggest_categorical('balance_strat', strat_list)
 
-    # Define the validation strategy
-    cv_strategy = KFold(n_splits=5, shuffle=True, random_state=42)
+        # SMOTE oversampling
+        if balance_strat == 'smote':
+            pipeline = ImbPipeline([
+                ('prep', preproccesor), 
+                ('balance', SMOTE(random_state=42)), 
+                ('model', model)
+            ])
+        
+        # random undersampling
+        elif balance_strat == 'undersample':
+            pipeline = ImbPipeline([
+                ('prep', preproccesor), 
+                ('balance', RandomUnderSampler(random_state=42)), 
+                ('model', model)
+            ])
+
+        # pipeline with no class balancing
+        else:
+            pipeline = ImbPipeline([('prep', preproccesor), ('model', model)])
+
+    # For regression problems (dont need class balancing)
+    else:
+        pipeline = ImbPipeline([('prep', preproccesor), ('model', model)])
+
+    # Define validation strategy and scoring method
+    if is_classification:
+        # f1_macro penelises models that will just pick the majority class
+        scoring = 'f1_macro'
+        cv_strategy = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    else:
+        scoring = 'r2'
+        cv_strategy = KFold(n_splits=5, shuffle=True, random_state=42)
 
     # Use_cross_vlaidate to extract training and testing performance 
     cv_results = cross_validate(pipeline, x, y, cv=cv_strategy, scoring=scoring, return_train_score=True)
@@ -175,9 +260,6 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
     # Drop rows that have null values on the predictor column
     df = df.dropna(subset=[target_col])
 
-    # Remove non needed columns
-    col_to_drop = [c for c in df.columns if 'Unnamed: 0' in c or c == '' or ' ' in c]
-    df = df.drop(columns= col_to_drop)
 
     # Automatic collinearity transformation
     dropped_cols = []
@@ -217,8 +299,9 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
     study = optuna.create_study(direction='maximize')
 
     # get model and find solver type
-    model_dict = config.get('models', {})
-    available_models = model_dict.get('classification', []) if is_classification else model_dict.get('regression', [])
+    # model_dict = config.get('models', {})
+    # available_models = model_dict.get('classification', []) if is_classification else model_dict.get('regression', [])
+    available_models = get_dynamic_model_recommendations(config, meta_data, is_classification)
 
     # run through all models iterativly
     for model_name in available_models:
@@ -241,7 +324,7 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
     # collect data without storing duplicates
     unique_trials = []
     seen_scores = set()
-    
+
     for t in trials:
         rounded_score = round(t.value, 4)
         if rounded_score not in seen_scores:
@@ -297,10 +380,19 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
         target_transformed = params.get('use_target_transform', False)
         specific_transform = t.user_attrs.get('transform_name', 'none')
 
+        # Extract balancing strategy
+        balance_strat = params.get('balance_strat', 'none')
+
         # Extract score information
         test_score = t.user_attrs.get('test_score', score)
         train_score = t.user_attrs.get('train_score', score)
         variance = t.user_attrs.get('variance', 0)
+
+        # Add in string for validation method to save to pipeline
+        if is_classification:
+            val_strat = 'Stratified Kflod Cross Validation'
+        else:
+            val_strat = 'Standard Kfold Cross Validation'
 
         # build pipeline dictionary (needed to log transformations and model selection)
         pipeline_config = {
@@ -309,11 +401,15 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
             'test_score': f'{test_score:.4f}',
             'train_score': f'{train_score:.4f}',
             'fit_variance': f'{variance:.4f}',
+            'class_balancing_strategy': balance_strat.title(), 
+            'class_balancing_justification': '',
             'model' : params['model_type'].replace('_', ' ').title(),
             'model_selection_justification' : '',
             'distribution_transformed' : target_transformed,
             'transformation_used': specific_transform,
             'distribution_transformation_justification' : '',
+            'validation_strategy': val_strat,
+            'validation_justification': '',
             'transformations' : []
         }
 
