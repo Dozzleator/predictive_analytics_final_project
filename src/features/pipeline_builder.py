@@ -8,8 +8,9 @@ from imblearn.under_sampling import RandomUnderSampler
 from features.ai_model_recommender import get_dynamic_model_recommendations
 from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.compose import ColumnTransformer, make_column_selector, TransformedTargetRegressor
-from sklearn.preprocessing import StandardScaler, RobustScaler, OneHotEncoder, OrdinalEncoder, PolynomialFeatures
-from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler, RobustScaler, OneHotEncoder, OrdinalEncoder, PolynomialFeatures, KBinsDiscretizer
+from sklearn.experimental import enable_iterative_imputer
+from sklearn.impute import SimpleImputer, IterativeImputer, KNNImputer
 from sklearn.model_selection import cross_val_score, KFold, cross_validate, StratifiedKFold
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor, GradientBoostingClassifier, GradientBoostingRegressor, ExtraTreesClassifier
 from sklearn.linear_model import LogisticRegression, LinearRegression
@@ -58,13 +59,36 @@ def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame
     if model_type == 'neural_network' and num_scale == 'none':
         num_scale = 'standard'
 
-    # Map strings to functional strategies
-    imputer_map = {imp: SimpleImputer(strategy=imp) for imp in impute_strat}
+    # Map imputation functions
+    imputer_map = {
+        'mean': SimpleImputer(strategy='mean'),
+        'median': SimpleImputer(strategy='median'),
+        'most_frequent': SimpleImputer(strategy='most_frequent'),
+        'knn': KNNImputer(n_neighbors=5),
+        'iterative': IterativeImputer(max_iter=10, random_state=42)
+    }
+
+    # Map scalling functions
     scaler_map = {'standard': StandardScaler(), 'robust': RobustScaler(), 'none': 'passthrough'}
+
+    # Map encoding functions (for classification)
     encode_map = {'one_hot': OneHotEncoder(handle_unknown='ignore', sparse_output=False), 'ordinal': OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1)}
 
     # Build Transformer for numerical columns
     num_steps = [('impute', imputer_map[num_impute])]
+
+    # Bin the data if categorical to improve model performance
+    use_binning = trial.suggest_categorical('use_binning', [True, False])
+
+    if use_binning:            
+            # Test between 5 and 20 bins to find best mathmatical option
+            n_bins = trial.suggest_int('n_bins', 5, 20)
+
+            # Test how bins should be calculated to find ideal binning
+            bin_strategy = trial.suggest_categorical('bin_strategy', ['uniform', 'quantile', 'kmeans'])
+
+            num_steps.append(('binning', KBinsDiscretizer(n_bins=n_bins, encode='ordinal', strategy=bin_strategy)))
+
     if num_scale != 'none':
         num_steps.append(('scale', scaler_map[num_scale]))
 
@@ -260,7 +284,6 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
     # Drop rows that have null values on the predictor column
     df = df.dropna(subset=[target_col])
 
-
     # Automatic collinearity transformation
     dropped_cols = []
     num_df = df.select_dtypes(include=[np.number])
@@ -383,6 +406,16 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
         # Extract balancing strategy
         balance_strat = params.get('balance_strat', 'none')
 
+        # Extract binning strategy (if one exists)
+        use_binning = params.get('use_binning', False)
+
+        if use_binning:
+            n_bins = params.get('n_bins')
+            bin_strat = params.get('bin_strategy', 'quantile')
+            binning_label = f'{bin_strat.title()} Binning Strategy)'
+        else:
+            binning_label = 'none'
+
         # Extract score information
         test_score = t.user_attrs.get('test_score', score)
         train_score = t.user_attrs.get('train_score', score)
@@ -429,6 +462,11 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
             {
                 'feature_type': 'numeric',
                 'imputation': num_impute_strat,
+                'binning' : [{
+                    'strategy': binning_label,
+                    'columns': num_cols,
+                    'justification': ''
+                }] if use_binning and num_cols else [],
                 'scaling': [{
                     'strategy': params['num_scale'], 
                     'columns': num_cols, 

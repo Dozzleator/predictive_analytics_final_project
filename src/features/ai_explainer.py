@@ -9,6 +9,8 @@ def call_llm_for_justification(context_data: str, df_metadata: str) -> str:
         focus = 'Focus strictly on why this mathematical algorithm suits the dataset size and complexity.'
     elif 'Smote' in context_data or 'Undersample' in context_data:
         focus = 'Focus strictly on why manipulating the dataset distribution with this balancing strategy prevents the model from developing a majority-class bias.'
+    elif 'Discretisation' in context_data or 'Binning' in context_data:
+        focus = 'Focus strictly on why grouping continuous numerical data into discrete mathematical bins helps algorithms find non-linear patterns and neutralises extreme outliers.'
     else:
         focus = 'Focus strictly on data types, missing values, outliers, or model mechanics for the specified columns.'
 
@@ -91,6 +93,16 @@ def populate_full_justifications(recommendation_skeleton: dict, df_metadata: dic
                     imp['justification'] = call_llm_for_justification(ctx, metadata_str)
                 else:
                     imp['justification'] = 'Columns contain no missing values; imputation bypassed.'
+
+            # Justify Binning
+            for binn in trans.get('binning', []):
+                strat = binn['strategy']
+                if strat != 'none':
+                    cols = ', '.join(binn['columns'])
+                    ctx = f"{feat_type.title()} Feature Discretisation | Apply '{strat}' to columns: [{cols}]"
+                    binn['justification'] = call_llm_for_justification(ctx, metadata_str)
+                else:
+                    binn['justification'] = 'Continuous variables were not discretised.'
 
             # Justify Scaling
             for scl in trans.get('scaling', []):

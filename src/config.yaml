@@ -2,6 +2,8 @@ imputation:
   - 'mean'
   - 'most_frequent'
   - 'median'
+  - 'knn'
+  - 'iterative'
 
 scaling:
   - 'standard'
