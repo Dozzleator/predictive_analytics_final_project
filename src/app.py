@@ -184,6 +184,13 @@ def build_dataset_overview(df: pd.DataFrame, target_col: str) -> json:
         else:
             st.warning('No column statistics for categorical columns found in the meta data')
 
+    # Dynamic warning for classification models
+    st.write('')
+    task_type = meta_data.get('model_task_type', '').lower()
+
+    if 'classification' in task_type:
+        st.warning("**Data Quality Warning:** You are running a **Classification** task. To build a highly accurate classification model, your data must be exceptionally clean, and your target column must have strong, logical relationships with the input features. Noisy data or overlapping categories will severely limit the model's accuracy.")
+
     st.divider()
     return meta_data
 
@@ -319,6 +326,25 @@ def display_results_timeline(recommendations: dict) -> None:
                     delta=variance_str, 
                     delta_color='inverse'
                 )
+
+            # Parse string values to floats
+            tr_score = float(train_score)
+            te_score = float(test_score)
+            v_score = float(variance)
+
+            try:
+                # Check underfitting
+                if tr_score < 0.6 and te_score < 0.6:
+                    st.write('')
+                    st.error('Warning model is underfitting')
+
+                # Check overfitting
+                if v_score > 0.1:
+                    st.write('')
+                    st.error('Warning model is overfitting')
+
+            except ValueError:
+                pass
 
             st.divider()
 

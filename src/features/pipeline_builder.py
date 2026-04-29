@@ -8,7 +8,7 @@ from imblearn.under_sampling import RandomUnderSampler
 from features.ai_model_recommender import get_dynamic_model_recommendations
 from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.compose import ColumnTransformer, make_column_selector, TransformedTargetRegressor
-from sklearn.preprocessing import StandardScaler, RobustScaler, OneHotEncoder, OrdinalEncoder, PolynomialFeatures, KBinsDiscretizer
+from sklearn.preprocessing import StandardScaler, RobustScaler, OneHotEncoder, OrdinalEncoder, TargetEncoder, PolynomialFeatures, KBinsDiscretizer
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import SimpleImputer, IterativeImputer, KNNImputer
 from sklearn.model_selection import cross_val_score, KFold, cross_validate, StratifiedKFold
@@ -72,7 +72,10 @@ def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame
     scaler_map = {'standard': StandardScaler(), 'robust': RobustScaler(), 'none': 'passthrough'}
 
     # Map encoding functions (for classification)
-    encode_map = {'one_hot': OneHotEncoder(handle_unknown='ignore', sparse_output=False), 'ordinal': OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1)}
+    encode_map = {'one_hot': OneHotEncoder(handle_unknown='ignore', sparse_output=False),
+        'ordinal': OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1),
+        'target':TargetEncoder()
+    }
 
     # Build Transformer for numerical columns
     num_steps = [('impute', imputer_map[num_impute])]
@@ -249,14 +252,18 @@ def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame
     else:
         pipeline = ImbPipeline([('prep', preproccesor), ('model', model)])
 
+    #tell optuna what splits to suggest for the cross validation
+    dynamic_splits = trial.suggest_int('cv_n_splits', 3, 8)
+    dynamic_shuffle = trial.suggest_categorical('cv_shuffle', [True])
+
     # Define validation strategy and scoring method
     if is_classification:
         # f1_macro penelises models that will just pick the majority class
         scoring = 'f1_macro'
-        cv_strategy = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+        cv_strategy = StratifiedKFold(n_splits=dynamic_splits, shuffle=dynamic_shuffle, random_state=42)
     else:
         scoring = 'r2'
-        cv_strategy = KFold(n_splits=5, shuffle=True, random_state=42)
+        cv_strategy = KFold(n_splits=dynamic_splits, shuffle=dynamic_shuffle, random_state=42)
 
     # Use_cross_vlaidate to extract training and testing performance 
     cv_results = cross_validate(pipeline, x, y, cv=cv_strategy, scoring=scoring, return_train_score=True)
@@ -349,10 +356,13 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
     seen_scores = set()
 
     for t in trials:
-        rounded_score = round(t.value, 4)
-        if rounded_score not in seen_scores:
+        # Only show one pipeline per model to get some variation
+        current_model = t.params.get('model_type')
+
+        if current_model not in seen_scores:
             unique_trials.append(t)
-            seen_scores.add(rounded_score)
+            seen_scores.add(current_model)
+
         if len(unique_trials) == 3:
             break
 
@@ -427,6 +437,25 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
         else:
             val_strat = 'Standard Kfold Cross Validation'
 
+        # Find hyperparameters used in model
+        model_params = {}
+
+        # Exclude hyperparameters that are not related to the model
+        preprocessing_keys = [
+            'model_type', 'num_impute', 'num_scale', 'cat_encode', 
+            'use_binning', 'n_bins', 'bin_strategy', 'balance_strat', 
+            'use_target_transform', 'poly_degree', 'cv_n_splits'
+        ]
+
+        for key, value in params.items():
+            # pull strategies related to model 
+            if key not in preprocessing_keys:
+                clean_key = key.replace('-', ' ').title()
+                model_params[clean_key] = value
+
+        # clean model name aswell
+        model_name_clean = model_name.replace('_', ' ')
+
         # build pipeline dictionary (needed to log transformations and model selection)
         pipeline_config = {
             'rank' : rank,
@@ -436,13 +465,18 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
             'fit_variance': f'{variance:.4f}',
             'class_balancing_strategy': balance_strat.title(), 
             'class_balancing_justification': '',
-            'model' : params['model_type'].replace('_', ' ').title(),
+            'model' : model_name_clean,
             'model_selection_justification' : '',
+            'model_hyperparameters': model_params,
             'distribution_transformed' : target_transformed,
             'transformation_used': specific_transform,
             'distribution_transformation_justification' : '',
             'validation_strategy': val_strat,
             'validation_justification': '',
+            'validation_hyperparameters': {
+                'n_splits': params.get('cv_n_splits'),
+                'shuffle': params.get('cv_shuffle')
+            },
             'transformations' : []
         }
 
@@ -465,7 +499,10 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
                 'binning' : [{
                     'strategy': binning_label,
                     'columns': num_cols,
-                    'justification': ''
+                    'justification': '',
+                    'hyperparameters': {
+                        'n_bins': params.get('n_bins')
+                    }
                 }] if use_binning and num_cols else [],
                 'scaling': [{
                     'strategy': params['num_scale'], 
