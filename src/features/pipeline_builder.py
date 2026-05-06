@@ -1,11 +1,18 @@
+# Functional dependencies
 import optuna
 import numpy as np
 import pandas as pd
 import warnings
+
+# to call AI
+from features.ai_model_recommender import get_dynamic_model_recommendations
+
+# Dependancies for class balancing
 from imblearn.pipeline import Pipeline as ImbPipeline
 from imblearn.over_sampling import SMOTE
 from imblearn.under_sampling import RandomUnderSampler
-from features.ai_model_recommender import get_dynamic_model_recommendations
+
+# sci-kit learn packages
 from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.compose import ColumnTransformer, make_column_selector, TransformedTargetRegressor
 from sklearn.preprocessing import StandardScaler, RobustScaler, OneHotEncoder, OrdinalEncoder, TargetEncoder, PolynomialFeatures, KBinsDiscretizer
@@ -18,6 +25,9 @@ from sklearn.neural_network import MLPClassifier, MLPRegressor
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
+
+# Catboost
+from catboost import CatBoostClassifier, CatBoostRegressor
 
 # Block these warnings from streamlit
 warnings.filterwarnings('ignore', category=ConvergenceWarning)
@@ -114,7 +124,7 @@ def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame
         # Random Forrest Classifier
         max_tree_depth = 25 if len(x) > 50000 else 10
         if model_type == 'random_forest':
-            model = RandomForestClassifier(max_depth=trial.suggest_int('max_depth', 5, max_tree_depth), n_jobs=-1)
+            model = RandomForestClassifier(max_depth=trial.suggest_int('max_depth', 5, max_tree_depth), n_jobs=1)
 
         # MLP Neural Network Classifier
         elif model_type == 'neural_network':
@@ -136,13 +146,25 @@ def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame
                 random_state=42
             )
 
+        # Cat Boost Classifier
+        elif model_type == 'cat_boost_classifier':
+            model = CatBoostClassifier(
+                iterations=trial.suggest_int('cb_iterations', 50, 300),
+                learning_rate=trial.suggest_float('cb_learning_rate', 0.01, 0.3, log=True),
+                depth=trial.suggest_int('cb_depth', 4, 10),
+                silent=True, 
+                allow_writing_files=False,
+                thread_count=1,
+                random_state=42
+            )
+
         # KNN model
         elif model_type == 'knn':
             model = KNeighborsClassifier(
                 n_neighbors=trial.suggest_int('knn_neighbors', 3, 15),
                 weights=trial.suggest_categorical('knn_weights', ['uniform', 'distance']),
                 p=trial.suggest_categorical('knn_p', [1, 2]),
-                n_jobs=-1
+                n_jobs=1
             )
 
         # Extra Trees model
@@ -151,7 +173,7 @@ def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame
                 n_estimators=trial.suggest_int('et_estimators', 50, 300),
                 max_depth=trial.suggest_int('et_max_depth', 3, max_tree_depth),
                 random_state=42,
-                n_jobs=-1
+                n_jobs=1
             )
 
         # SCV model
@@ -172,7 +194,7 @@ def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame
     else:
         # Random Forrest Regression
         if model_type == 'random_forest':
-            base_model = RandomForestRegressor(max_depth=trial.suggest_int('max_depth', 3, 10), n_jobs=-1)
+            base_model = RandomForestRegressor(max_depth=trial.suggest_int('max_depth', 3, 10), n_jobs=1)
 
         # Linear Regression
         elif model_type == 'linear_regression':
@@ -200,6 +222,18 @@ def build_optuna_objective(trial: optuna.Trial, x: pd.DataFrame, y: pd.DataFrame
                 n_estimators=trial.suggest_int('gb_r_n_estimators', 50, 300),
                 learning_rate=trial.suggest_float('gb_r_learning_rate', 0.01, 0.3, log=True),
                 max_depth=trial.suggest_int('gb_r_max_depth', 3, 9),
+                random_state=42
+            )
+
+        # Cat Boost Regression
+        elif model_type == 'cat_boost_regressor':
+            base_model = CatBoostRegressor(
+                iterations=trial.suggest_int('cb_r_iterations', 50, 300),
+                learning_rate=trial.suggest_float('cb_r_learning_rate', 0.01, 0.3, log=True),
+                depth=trial.suggest_int('cb_r_depth', 4, 10),
+                silent=True, 
+                allow_writing_files=False,
+                thread_count=1,
                 random_state=42
             )
 
@@ -308,6 +342,11 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
         if dropped_cols:
             df = df.drop(columns=dropped_cols)
 
+    # Convert booleans to 1/0 for correct modelling
+    bool_cols = df.select_dtypes(include=['bool']).columns
+    if not bool_cols.empty:
+        df[bool] = df[bool_cols].astype(int)
+
     # Guarantee chronological order so TimeSeriesSplit doesn't read backwards
     time_cols = [col for col in df.columns if 'year' in col.lower() or 'date' in col.lower()]
     if time_cols:
@@ -333,19 +372,19 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
     # available_models = model_dict.get('classification', []) if is_classification else model_dict.get('regression', [])
     available_models = get_dynamic_model_recommendations(config, meta_data, is_classification)
 
+    # # backup if AI hallutionates
+    # if not available_models:
+    #         if is_classification:
+    #             available_models = model_dict.get('classification', [])
+    #         else:
+    #             available_models = model_dict.get('regression', [])
+
     # run through all models iterativly
     for model_name in available_models:
         study.enqueue_trial({'model_type': model_name})
 
-    # end optimisation when max trials reached
-    trial_runs = 0
-
-    while trial_runs < max_trials:
-        trial = study.ask()
-        score = build_optuna_objective(trial, x, y, is_classification, config)
-        study.tell(trial, score)
-
-        trial_runs += 1
+    # run optimisations in parrelell 
+    study.optimize(lambda trial: build_optuna_objective(trial, x, y, is_classification, config), n_trials=max_trials, n_jobs=-1)
 
     # get results from optuna optimisation
     trials = study.get_trials(deepcopy=False, states=[optuna.trial.TrialState.COMPLETE])
@@ -454,7 +493,7 @@ def optimal_pipeline(df: pd.DataFrame, target_col: str, meta_data: dict, config:
                 model_params[clean_key] = value
 
         # clean model name aswell
-        model_name_clean = model_name.replace('_', ' ')
+        model_name_clean = params['model_type'].replace('_', ' ').title()
 
         # build pipeline dictionary (needed to log transformations and model selection)
         pipeline_config = {

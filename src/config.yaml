@@ -1,37 +1,39 @@
 imputation:
-  - 'mean'
-  - 'most_frequent'
-  - 'median'
-  - 'knn'
-  - 'iterative'
+  - "mean"
+  - "most_frequent"
+  - "median"
+  - "knn"
+  - "iterative"
 
 scaling:
-  - 'standard'
-  - 'robust'
-  - 'none'
+  - "standard"
+  - "robust"
+  - "none"
 
 encoding:
-  - 'one_hot'
-  - 'ordinal'
-  - 'ordinal'
+  - "one_hot"
+  - "ordinal"
+  - "ordinal"
 
 balancing:
-  - 'none'
-  - 'smote'
-  - 'undersample'
+  - "none"
+  - "smote"
+  - "undersample"
 
 models:
   classification:
-    - 'random_forest'
-    - 'logistic_regression'
-    - 'neural_network'
-    - 'gradient_boost_classifier'
-    - 'knn'
-    - 'extra_tree_classifier'
-    - 'svc'
+    - "random_forest"
+    - "logistic_regression"
+    - "neural_network"
+    - "gradient_boost_classifier"
+    - "knn"
+    - "extra_tree_classifier"
+    - "svc"
+    - "cat_boost_classifier"
   regression:
-    - 'random_forest'
-    - 'linear_regression'
-    - 'polynomial_regression'
-    - 'neural_network'
-    - 'gradient_boost_regressor'
+    - "random_forest"
+    - "linear_regression"
+    - "polynomial_regression"
+    - "neural_network"
+    - "gradient_boost_regressor"
+    - "cat_boost_regressor"

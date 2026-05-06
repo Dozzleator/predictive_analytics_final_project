@@ -222,7 +222,7 @@ def build_pipeline_optimisation(df: pd.DataFrame, meta_data: dict, target_col: s
         with st.status('Building optimised machine learning pipeline', expanded= True) as status:
             try:
                 # Write out message to display optimisation target
-                st.write(f'Executing pipeline automisation comparing {int(max_trials)} pipeline iterations')
+                st.write(f'Executing pipeline optimisation comparing {int(max_trials)} pipeline iterations')
 
                 # Run optimiser through imported function from "pipeline_builder.py"
                 recommendation_raw, metadata_df = optimal_pipeline(
